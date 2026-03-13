@@ -22,9 +22,10 @@
           </button>
           <!-- Clickable item / label -->
           <button
-            :disabled="!(this.parent == uid)"
+            :disabled="!this.parentOpenTarget"
             class="k-tree-folder"
             type="button"
+            @click="openParent"
           >
             <k-icon-frame :icon="this.parentIcon" />
             <span class="k-tree-folder-label">{{ this.parentTitle }}</span>
@@ -65,6 +66,7 @@ export default {
         default: true
       },
       parentTitle: null,
+      parentOpenTarget: null,
       treeItems: null,
     };
   },
@@ -86,12 +88,20 @@ export default {
     this.label = response.label;// ?? this.$attrs.label; // Label from php-translated blueprint
     // this.label = this.$attrs.label; // Grab label from user blueprint
     this.parentTitle = response.parentTitle;// ?? this.$attrs.content.title;
+    this.parentOpenTarget = response.parentOpenTarget ?? null;
     //this.parentTitle = this.$attrs.content.title;
     this.isSite = response.isSite;
     this.treeItems = response.pages;
   },
 
   methods: {
+    openParent() {
+      if (!this.parentOpenTarget) {
+        return;
+      }
+
+      window.panel.open(this.parentOpenTarget);
+    },
     onSelect(name){
       let uid = null;
       // window.console.log("OnSelect()=", name);

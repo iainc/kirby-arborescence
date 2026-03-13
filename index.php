@@ -48,18 +48,23 @@ Kirby::plugin(
                 ],
                 'computed' => [
                     'parentIcon' => function(){
+                        if ($this->rootPage() === 'site') {
+                            return App::instance()->site()->homePage()?->panel()->image()['icon'] ?? 'home';
+                        }
+
                         /** @var \Kirby\Cms\Page | Site */
                         $model = $this->model();
                         return match (true) {
-                            $this instanceof Kirby\Cms\Site => 'home',
-                            default                         => $this->model()->panel()->image()['icon'] ?? null
+                            default => $model->panel()->image()['icon'] ?? null
                         };
                     },
                     'parentTitle' => function(){
                         // No root page ? --> set to current content object
                         $root = $this->rootPage();
                         $model = null;
-                        if(!$root){
+                        if ($root === 'site') {
+                            $model = App::instance()->site()->homePage();
+                        } elseif(!$root){
                             /** @var \Kirby\Cms\Page | Site */
                             $model = $this->model();
                         }
@@ -82,6 +87,18 @@ Kirby::plugin(
                         // Todo: dirty = error speads in UI
                         return 'Invalid rootPage setting !';
                     },
+                    'parentOpenTarget' => function () {
+                        $model = match (true) {
+                            $this->rootPage() === 'site' => App::instance()->site()->homePage(),
+                            default                      => Find::parent($this->rootPage()),
+                        };
+
+                        if (!$model || !$model->id()) {
+                            return null;
+                        }
+
+                        return 'pages/' . str_replace('/', '+', $model->id());
+                    },
                     'pages' => function () {
                         // The pages object is sent with the initial request.
                         // Note: Otherwise the load triggers another load, which slows down load time and feels buggy
@@ -102,8 +119,6 @@ Kirby::plugin(
                             }
 
                             unset($pages[$index]);
-                            array_unshift($pages, $page);
-
                             return array_values($pages);
                         }
 
@@ -113,7 +128,7 @@ Kirby::plugin(
                         return; // disabled since k5 !
                     },
                     'isSite' => function(){
-                        return $this instanceof Kirby\Cms\Site;
+                        return $this->model() instanceof Kirby\Cms\Site;
                     }
                 ]
             ]
