@@ -85,10 +85,29 @@ Kirby::plugin(
                     'pages' => function () {
                         // The pages object is sent with the initial request.
                         // Note: Otherwise the load triggers another load, which slows down load time and feels buggy
-                        return (new PageTree())->children(
+                        $pages = (new PageTree())->children(
                             parent: $this->rootPage(), // App::instance()->request()->get('parent'),
                             moving: null
                         );
+
+                        if ($this->rootPage() !== 'site') {
+                            return $pages;
+                        }
+
+                        $homePageId = App::instance()->site()->homePageId();
+
+                        foreach ($pages as $index => $page) {
+                            if (($page['id'] ?? null) !== $homePageId) {
+                                continue;
+                            }
+
+                            unset($pages[$index]);
+                            array_unshift($pages, $page);
+
+                            return array_values($pages);
+                        }
+
+                        return $pages;
                     },
                     'activePage' => function(){
                         return; // disabled since k5 !
