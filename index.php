@@ -4,11 +4,40 @@ use Kirby\Toolkit\I18n;
 use Kirby\Panel\Controller\PageTree;
 use Kirby\Cms\App;
 use Kirby\Cms\Find;
+use Kirby\Cms\Page;
+use Kirby\Cms\Site;
 
 // Vue component docs : https://getkirby.com/docs/reference/plugins/extensions/sections#vue-component
-// 
+//
 
 // Useful for updating related code parts : Kirby/src/Panel/Controller/PageTree.php
+
+if (!function_exists('arborescencePanelTitle')) {
+    function arborescencePanelTitle(Page $page): string
+    {
+        $title = $page->panel()->props()['title'] ?? $page->title()->toString();
+
+        if (is_string($title) === true && $title !== '') {
+            return $title;
+        }
+
+        return I18n::translate('page');
+    }
+}
+
+class ArborescencePageTree extends PageTree
+{
+    public function entry(Site|Page $entry, Page|null $moving = null): array
+    {
+        $data = parent::entry($entry, $moving);
+
+        if ($entry instanceof Page) {
+            $data['label'] = arborescencePanelTitle($entry);
+        }
+
+        return $data;
+    }
+}
 
 Kirby::plugin(
     name: 'daandelange/arborescence',
@@ -79,7 +108,7 @@ Kirby::plugin(
                                 // Todo: rather show site title ?
                                 $model instanceof Kirby\Cms\Site => I18n::translate('view.site'),
                                 // Any page: show page title
-                                default                               => $model->content()->title()->value() ?? I18n::translate('page')
+                                default                               => arborescencePanelTitle($model)
                             };
                             
                         }
@@ -102,7 +131,7 @@ Kirby::plugin(
                     'pages' => function () {
                         // The pages object is sent with the initial request.
                         // Note: Otherwise the load triggers another load, which slows down load time and feels buggy
-                        $pages = (new PageTree())->children(
+                        $pages = (new ArborescencePageTree())->children(
                             parent: $this->rootPage(), // App::instance()->request()->get('parent'),
                             moving: null
                         );
