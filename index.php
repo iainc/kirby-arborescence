@@ -1,27 +1,260 @@
 <?php
-use Kirby\Toolkit\Query;
-use Kirby\Toolkit\I18n;
-use Kirby\Panel\Controller\PageTree;
+
 use Kirby\Cms\App;
 use Kirby\Cms\Find;
 use Kirby\Cms\Page;
 use Kirby\Cms\Site;
-
-// Vue component docs : https://getkirby.com/docs/reference/plugins/extensions/sections#vue-component
-//
-
-// Useful for updating related code parts : Kirby/src/Panel/Controller/PageTree.php
+use Kirby\Panel\Controller\PageTree;
+use Kirby\Toolkit\I18n;
 
 if (!function_exists('arborescencePanelTitle')) {
     function arborescencePanelTitle(Page $page): string
     {
-        $title = $page->panel()->props()['title'] ?? $page->title()->toString();
+        if (function_exists('ia_feature_flags_panel_title') === true) {
+            return ia_feature_flags_panel_title($page);
+        }
+
+        $title = $page->title()->toString();
 
         if (is_string($title) === true && $title !== '') {
             return $title;
         }
 
         return I18n::translate('page');
+    }
+}
+
+if (!function_exists('arborescenceParentModel')) {
+    function arborescenceParentModel(string $rootPage, Site|Page $model): Site|Page|null
+    {
+        if ($rootPage === 'site') {
+            return App::instance()->site()->homePage();
+        }
+
+        if ($rootPage === '') {
+            return $model;
+        }
+
+        return Find::parent($rootPage);
+    }
+}
+
+if (!function_exists('arborescenceRootModel')) {
+    function arborescenceRootModel(?string $rootPage): Site|Page|null
+    {
+        if ($rootPage === null || $rootPage === '') {
+            return null;
+        }
+
+        if ($rootPage === 'site') {
+            return App::instance()->site();
+        }
+
+        return Find::parent($rootPage);
+    }
+}
+
+if (!function_exists('arborescenceSearchIndexCacheKey')) {
+    function arborescenceSearchIndexCacheKey(string $rootPage): string
+    {
+        $app = App::instance();
+        $language = $app->language()?->code() ?? 'default';
+        $user = $app->user()?->id() ?? 'guest';
+        $flags = function_exists('ia_feature_flags_active_flags') === true
+            ? implode(',', ia_feature_flags_active_flags())
+            : '';
+
+        return 'arborescence.search-index.' . md5(json_encode([
+            'flags' => $flags,
+            'language' => $language,
+            'root' => $rootPage,
+            'user' => $user,
+        ]));
+    }
+}
+
+if (!function_exists('arborescenceSearchablePath')) {
+    function arborescenceSearchablePath(string $id): string
+    {
+        return $id;
+    }
+}
+
+if (!function_exists('arborescenceVisibleChildren')) {
+    function arborescenceVisibleChildren(Site|Page $parent, bool $skipHomePage = false): array
+    {
+        $children = $parent
+            ->childrenAndDrafts()
+            ->filterBy('isListable', true)
+            ->values();
+
+        if ($skipHomePage !== true) {
+            return $children;
+        }
+
+        $homePageId = App::instance()->site()->homePageId();
+
+        return array_values(array_filter(
+            $children,
+            fn ($child) => $child instanceof Page && $child->id() !== $homePageId
+        ));
+    }
+}
+
+if (!function_exists('arborescenceTopLevelEntries')) {
+    function arborescenceTopLevelEntries(string $rootPage): array
+    {
+        $root = arborescenceRootModel($rootPage);
+        if ($root === null) {
+            return [];
+        }
+
+        $tree = new ArborescencePageTree();
+
+        return array_map(
+            fn (Page $page) => $tree->entry($page),
+            arborescenceVisibleChildren($root, $rootPage === 'site')
+        );
+    }
+}
+
+if (!function_exists('arborescenceParentIcon')) {
+    function arborescenceParentIcon(string $rootPage, Site|Page|null $model = null): string|null
+    {
+        $model ??= arborescenceRootModel($rootPage);
+        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
+
+        if ($rootPage === 'site') {
+            return $parent?->panel()->image()['icon'] ?? 'home';
+        }
+
+        if ($parent instanceof Page) {
+            return $parent->panel()->image()['icon'] ?? null;
+        }
+
+        return 'home';
+    }
+}
+
+if (!function_exists('arborescenceParentTitle')) {
+    function arborescenceParentTitle(string $rootPage, Site|Page|null $model = null): string
+    {
+        $model ??= arborescenceRootModel($rootPage);
+        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
+
+        if ($parent instanceof Site) {
+            return I18n::translate('view.site');
+        }
+
+        if ($parent instanceof Page) {
+            return arborescencePanelTitle($parent);
+        }
+
+        return 'Invalid rootPage setting !';
+    }
+}
+
+if (!function_exists('arborescenceParentOpenTarget')) {
+    function arborescenceParentOpenTarget(string $rootPage, Site|Page|null $model = null): string|null
+    {
+        $model ??= arborescenceRootModel($rootPage);
+        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
+
+        if (!$parent || !$parent->id()) {
+            return null;
+        }
+
+        return 'pages/' . str_replace('/', '+', $parent->id());
+    }
+}
+
+if (!function_exists('arborescenceTreePayload')) {
+    function arborescenceTreePayload(string $rootPage, bool $showParent = true): array
+    {
+        $model = arborescenceRootModel($rootPage);
+
+        return [
+            'headline' => null,
+            'isSite' => $model instanceof Site,
+            'label' => null,
+            'pages' => arborescenceTopLevelEntries($rootPage),
+            'parentIcon' => arborescenceParentIcon($rootPage, $model),
+            'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
+            'parentTitle' => arborescenceParentTitle($rootPage, $model),
+            'rootPage' => $rootPage,
+            'showParent' => $showParent,
+        ];
+    }
+}
+
+if (!function_exists('arborescenceSearchIndexRecord')) {
+    function arborescenceSearchIndexRecord(Page $page, string|null $parentId): array
+    {
+        $uuid = $page->uuid()?->toString();
+
+        return [
+            'icon' => $page->panel()->image()['icon'] ?? null,
+            'id' => $page->id(),
+            'label' => arborescencePanelTitle($page),
+            'parentId' => $parentId,
+            'path' => arborescenceSearchablePath($page->id()),
+            'slug' => $page->slug(),
+            'uuid' => $uuid,
+            'value' => $uuid ?? $page->id(),
+        ];
+    }
+}
+
+if (!function_exists('arborescenceCollectSearchIndex')) {
+    function arborescenceCollectSearchIndex(
+        Page $page,
+        string|null $parentId,
+        array &$records
+    ): void {
+        $records[] = arborescenceSearchIndexRecord(
+            page: $page,
+            parentId: $parentId
+        );
+
+        foreach (arborescenceVisibleChildren($page) as $child) {
+            arborescenceCollectSearchIndex(
+                page: $child,
+                parentId: $page->id(),
+                records: $records
+            );
+        }
+    }
+}
+
+if (!function_exists('arborescenceSearchIndex')) {
+    function arborescenceSearchIndex(string $rootPage): array
+    {
+        $cache = App::instance()->cache('pages');
+        $cacheKey = arborescenceSearchIndexCacheKey($rootPage);
+        $cached = $cache->get($cacheKey);
+
+        if (is_array($cached) === true) {
+            return $cached;
+        }
+
+        $root = arborescenceRootModel($rootPage);
+        $records = [];
+
+        if ($root === null) {
+            $cache->set($cacheKey, $records);
+            return $records;
+        }
+
+        foreach (arborescenceVisibleChildren($root, $rootPage === 'site') as $child) {
+            arborescenceCollectSearchIndex(
+                page: $child,
+                parentId: null,
+                records: $records
+            );
+        }
+
+        $cache->set($cacheKey, $records);
+        return $records;
     }
 }
 
@@ -42,85 +275,65 @@ class ArborescencePageTree extends PageTree
 Kirby::plugin(
     name: 'daandelange/arborescence',
     info: [
-        'license' => 'MIT'
+        'license' => 'MIT',
     ],
     version: '1.0.0',
     extends: [
         'sections' => [
             'arborescence' => [
-                //'extends' => 'sections/pages',
                 'props' => [
                     'label' => function ($label = null) {
-                        return I18n::translate($label, $label); // translates lang arrays or keys
+                        return I18n::translate($label, $label);
                     },
                     'rootPage' => function (?string $rootPage = null) {
-                        // Set default dynamically
-                        if(!$rootPage){
-                            /** @var \Kirby\Cms\Page | Site */
+                        if (!$rootPage) {
                             $model = $this->model();
-                            //return $this->model()->id()??'site';
-                            if(!$model->id()) $rootPage = 'site';
-                            else $rootPage = $model->id();
+                            if (!$model->id()) {
+                                $rootPage = 'site';
+                            } else {
+                                $rootPage = $model->id();
+                            }
                         }
 
-                        // Sanitize
-                        if($rootPage!='site'){
-                            // Prepend page
-                            if(!str_starts_with($rootPage, 'pages/')) $rootPage = 'pages/'.$rootPage;
+                        if ($rootPage !== 'site' && str_starts_with($rootPage, 'pages/') !== true) {
+                            $rootPage = 'pages/' . $rootPage;
                         }
-                        return $rootPage; // self (page) or site
+
+                        return $rootPage;
                     },
-                    // Rather to show the parent entry or not 
-                    'showParent' => function(bool $showParent = true){
+                    'showParent' => function (bool $showParent = true) {
                         return $showParent;
-                    }
+                    },
                 ],
                 'computed' => [
-                    'parentIcon' => function(){
+                    'parentIcon' => function () {
+                        $model = arborescenceParentModel($this->rootPage(), $this->model());
+
                         if ($this->rootPage() === 'site') {
-                            return App::instance()->site()->homePage()?->panel()->image()['icon'] ?? 'home';
+                            return $model?->panel()->image()['icon'] ?? 'home';
                         }
 
-                        /** @var \Kirby\Cms\Page | Site */
-                        $model = $this->model();
-                        return match (true) {
-                            default => $model->panel()->image()['icon'] ?? null
-                        };
+                        if ($model instanceof Page) {
+                            return $model->panel()->image()['icon'] ?? null;
+                        }
+
+                        return 'home';
                     },
-                    'parentTitle' => function(){
-                        // No root page ? --> set to current content object
-                        $root = $this->rootPage();
-                        $model = null;
-                        if ($root === 'site') {
-                            $model = App::instance()->site()->homePage();
-                        } elseif(!$root){
-                            /** @var \Kirby\Cms\Page | Site */
-                            $model = $this->model();
-                        }
-                        // Custom object
-                        else {
-                            $model = Find::parent($root);
+                    'parentTitle' => function () {
+                        $model = arborescenceParentModel($this->rootPage(), $this->model());
+
+                        if ($model instanceof Site) {
+                            return I18n::translate('view.site');
                         }
 
-                        if($model){
-                            return match (true) {
-                                // Site : Match Kirby behaviour.
-                                // Todo: rather show site title ?
-                                $model instanceof Kirby\Cms\Site => I18n::translate('view.site'),
-                                // Any page: show page title
-                                default                               => arborescencePanelTitle($model)
-                            };
-                            
+                        if ($model instanceof Page) {
+                            return arborescencePanelTitle($model);
                         }
 
-                        // Todo: dirty = error speads in UI
                         return 'Invalid rootPage setting !';
                     },
                     'parentOpenTarget' => function () {
-                        $model = match (true) {
-                            $this->rootPage() === 'site' => App::instance()->site()->homePage(),
-                            default                      => Find::parent($this->rootPage()),
-                        };
+                        $model = arborescenceParentModel($this->rootPage(), $this->model());
 
                         if (!$model || !$model->id()) {
                             return null;
@@ -129,39 +342,41 @@ Kirby::plugin(
                         return 'pages/' . str_replace('/', '+', $model->id());
                     },
                     'pages' => function () {
-                        // The pages object is sent with the initial request.
-                        // Note: Otherwise the load triggers another load, which slows down load time and feels buggy
-                        $pages = (new ArborescencePageTree())->children(
-                            parent: $this->rootPage(), // App::instance()->request()->get('parent'),
-                            moving: null
-                        );
-
-                        if ($this->rootPage() !== 'site') {
-                            return $pages;
-                        }
-
-                        $homePageId = App::instance()->site()->homePageId();
-
-                        foreach ($pages as $index => $page) {
-                            if (($page['id'] ?? null) !== $homePageId) {
-                                continue;
-                            }
-
-                            unset($pages[$index]);
-                            return array_values($pages);
-                        }
-
-                        return $pages;
+                        return arborescenceTopLevelEntries($this->rootPage());
                     },
-                    'activePage' => function(){
-                        return; // disabled since k5 !
+                    'activePage' => function () {
+                        return;
                     },
-                    'isSite' => function(){
-                        return $this->model() instanceof Kirby\Cms\Site;
-                    }
-                ]
-            ]
-        ]
+                    'isSite' => function () {
+                        return $this->model() instanceof Site;
+                    },
+                ],
+            ],
+        ],
+        'api' => [
+            'routes' => [
+                [
+                    'pattern' => 'arborescence/tree',
+                    'method' => 'GET',
+                    'action' => function () {
+                        $rootPage = trim((string)$this->requestQuery('root'));
+                        $showParent = $this->requestQuery('showParent') !== '0';
 
+                        return arborescenceTreePayload($rootPage, $showParent);
+                    },
+                ],
+                [
+                    'pattern' => 'arborescence/search-index',
+                    'method' => 'GET',
+                    'action' => function () {
+                        $rootPage = trim((string)$this->requestQuery('root'));
+
+                        return [
+                            'searchIndex' => arborescenceSearchIndex($rootPage),
+                        ];
+                    },
+                ],
+            ],
+        ],
     ],
 );
