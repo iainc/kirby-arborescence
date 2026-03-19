@@ -260,6 +260,7 @@ export default {
           label: record.label,
           open: children.length > 0,
           pathParts: match?.pathParts ?? null,
+          status: record.status ?? null,
           title: record.displayTitle ?? record.label,
           titleParts: match?.titleParts ?? null,
           uuid: record.uuid ?? null,
@@ -723,6 +724,7 @@ export default {
           pathIndexMap: normalizedPath.indexMap,
           pathLabel,
           pathPrepared: fuzzysort.prepare(normalizedPath.text),
+          status: typeof record.status === "string" ? record.status : null,
           titleIndexMap: normalizedTitle.indexMap,
           titlePrepared: fuzzysort.prepare(normalizedTitle.text),
         };

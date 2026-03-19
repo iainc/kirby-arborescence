@@ -26,7 +26,12 @@
           @dblclick="toggle(item)"
         >
           <k-icon-frame :icon="itemIcon(item)" />
-          <span class="k-tree-folder-copy">
+          <span
+            :class="[
+              'k-tree-folder-copy',
+              { 'k-tree-folder-copy-with-path': pathParts(item).length > 0 }
+            ]"
+          >
             <span class="k-tree-folder-label">
               <span v-if="featureFlagParts(item).length > 0" class="k-ia-feature-flag-title">
                 <span class="k-ia-feature-flag-title-label">
@@ -67,6 +72,13 @@
                 ></span>
               </template>
             </span>
+          </span>
+          <span
+            v-if="statusIcon(item)"
+            class="k-tree-folder-status"
+            :title="statusTitle(item)"
+          >
+            <k-icon :type="statusIcon(item)" />
           </span>
         </button>
       </p>
@@ -260,6 +272,23 @@ export default {
     pathParts(item) {
       return Array.isArray(item.pathParts) === true ? item.pathParts : [];
     },
+    statusIcon(item) {
+      switch (item?.status) {
+      case "draft":
+        return "status-draft";
+      case "unlisted":
+        return "status-unlisted";
+      default:
+        return null;
+      }
+    },
+    statusTitle(item) {
+      if (item?.status === "draft" || item?.status === "unlisted") {
+        return this.$t(`page.status.${item.status}`);
+      }
+
+      return null;
+    },
     normalizeItem(item) {
       if (!item || typeof item !== "object") {
         return item;
@@ -338,27 +367,54 @@ export default {
 </script>
 
 <style>
+.page-tree-menu .k-tree-folder {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  text-align: left;
+}
+
 .page-tree-menu .k-tree-folder-copy {
-  display: flex;
-  align-items: baseline;
-  gap: 0.375rem;
+  grid-column: 2;
   min-width: 0;
   overflow: hidden;
 }
 
-.page-tree-menu .k-tree-folder-label {
-  flex: 0 1 auto;
-  min-width: 0;
+.page-tree-menu .k-tree-folder-copy.k-tree-folder-copy-with-path {
+  display: flex;
+  inline-size: 100%;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: flex-start;
 }
 
-.page-tree-menu .k-tree-folder-path {
-  flex: 1 1 auto;
+.page-tree-menu .k-tree-folder-copy.k-tree-folder-copy-with-path .k-tree-folder-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-tree-menu .k-tree-folder-copy.k-tree-folder-copy-with-path .k-tree-folder-path {
+  flex: 0 1 auto;
+  max-inline-size: min(22rem, 40vw);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-dimmed);
   font-size: var(--text-xs);
+}
+
+.page-tree-menu .k-tree-folder-status {
+  color: var(--color-text-dimmed);
+  grid-column: 3;
+  justify-self: end;
+}
+
+.page-tree-menu .k-tree-folder-status .k-icon {
+  --icon-size: 15px;
 }
 
 .page-tree-menu .k-tree-match {

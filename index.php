@@ -278,6 +278,7 @@ if (!function_exists('arborescenceSearchIndexRecord')) {
             'parentId' => $parentId,
             'path' => arborescenceSearchablePath($page->id()),
             'slug' => $page->slug(),
+            'status' => $page->status(),
             'uuid' => $uuid,
             'value' => $uuid ?? $page->id(),
         ];
@@ -376,6 +377,7 @@ class ArborescencePageTree extends PageTree
 
         if ($entry instanceof Page) {
             $data['label'] = arborescencePanelTitle($entry);
+            $data['status'] = $entry->status();
         }
 
         return $data;
