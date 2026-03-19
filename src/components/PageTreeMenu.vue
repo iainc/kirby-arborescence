@@ -119,6 +119,10 @@ export default {
     items: {
       type: [Array, Object],
     },
+    branchSorts: {
+      type: Object,
+      default: () => ({}),
+    },
     level: {
       default: 0,
       type: Number,
@@ -240,12 +244,11 @@ export default {
       return true;
     },
     originalLoad(path) {
-      return this.$panel.get("site/tree", {
-        query: {
-          move: this.move ?? null,
-          parent: path,
-        },
-      });
+      return this.$api.get("arborescence/children", {
+        branchSorts: JSON.stringify(this.branchSorts ?? {}),
+        move: this.move ?? null,
+        parent: path,
+      }, null, true);
     },
     async originalOpen(item) {
       item.children = await this.load(item.children);

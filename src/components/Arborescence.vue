@@ -48,6 +48,7 @@
         <page-tree-menu
           v-if="resolvedRoot"
           :key="treeKey"
+          :branch-sorts="configuredBranchSorts"
           :items="displayedTreeItems"
           :level="treeLevel"
           :parent="resolvedRoot"
@@ -107,9 +108,14 @@ export default {
       type: Boolean,
       default: true,
     },
+    standaloneBranchSorts: {
+      type: Object,
+      default: null,
+    },
   },
   data() {
     return {
+      branchSorts: null,
       headline: null,
       hasLoadedSearchIndex: false,
       isSite: false,
@@ -130,6 +136,11 @@ export default {
   },
 
   computed: {
+    configuredBranchSorts() {
+      return this.normalizeBranchSorts(
+        this.branchSorts ?? this.standaloneBranchSorts ?? {}
+      );
+    },
     displayedTreeItems() {
       if (this.isSearchActive === true) {
         return this.searchTreeItems;
@@ -188,6 +199,9 @@ export default {
 
       return "browse";
     },
+    serializedBranchSorts() {
+      return JSON.stringify(this.configuredBranchSorts);
+    },
   },
 
   created: async function() {
@@ -207,6 +221,7 @@ export default {
 
   methods: {
     applyResponse(response = {}) {
+      this.branchSorts = response.branchSorts ?? this.standaloneBranchSorts ?? {};
       this.headline = response.headline;
       this.root = response.rootPage ?? this.parent;
       this.parentIcon = response.parentIcon ?? "folder";
@@ -351,6 +366,7 @@ export default {
     async loadSearchIndex() {
       try {
         const response = await this.$api.get("arborescence/search-index", {
+          branchSorts: this.serializedBranchSorts,
           root: this.resolvedRoot,
         }, null, true);
 
@@ -401,6 +417,31 @@ export default {
 
       return String(value);
     },
+    normalizeBranchSorts(value) {
+      if (!value || typeof value !== "object" || Array.isArray(value) === true) {
+        return {};
+      }
+
+      return Object.entries(value).reduce((branchSorts, [branch, sortBy]) => {
+        if (typeof branch !== "string" || typeof sortBy !== "string") {
+          return branchSorts;
+        }
+
+        const normalizedBranch = branch
+          .trim()
+          .replace(/^pages\//, "")
+          .replace(/^\/+|\/+$/g, "")
+          .replaceAll("+", "/");
+        const normalizedSortBy = sortBy.trim();
+
+        if (normalizedBranch === "" || normalizedBranch === "site" || normalizedSortBy === "") {
+          return branchSorts;
+        }
+
+        branchSorts[normalizedBranch] = normalizedSortBy;
+        return branchSorts;
+      }, {});
+    },
     focusSearch({ select = true } = {}) {
       const input = this.$refs.searchInput?.$el?.querySelector("input");
 
@@ -419,6 +460,7 @@ export default {
     async loadInitialData() {
       if (typeof this.standaloneRootPage === "string" && this.standaloneRootPage !== "") {
         return this.$api.get("arborescence/tree", {
+          branchSorts: this.serializedBranchSorts,
           root: this.standaloneRootPage,
           showParent: this.standaloneShowParent ? "1" : "0",
         }, null, true);

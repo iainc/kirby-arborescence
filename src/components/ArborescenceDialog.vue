@@ -11,6 +11,7 @@
     <arborescence
       ref="arbo"
       :autofocus="true"
+      :standalone-branch-sorts="branchSorts"
       :close-on-select="true"
       standalone-root-page="site"
       :standalone-show-parent="true"
@@ -24,6 +25,12 @@ import Arborescence from "./Arborescence.vue";
 export default {
   components: {
     Arborescence,
+  },
+  props: {
+    branchSorts: {
+      type: Object,
+      default: () => ({}),
+    },
   },
   mounted() {
     this.$nextTick(() => {

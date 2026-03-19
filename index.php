@@ -55,7 +55,7 @@ if (!function_exists('arborescenceRootModel')) {
 }
 
 if (!function_exists('arborescenceSearchIndexCacheKey')) {
-    function arborescenceSearchIndexCacheKey(string $rootPage): string
+    function arborescenceSearchIndexCacheKey(string $rootPage, array $branchSorts = []): string
     {
         $app = App::instance();
         $language = $app->language()?->code() ?? 'default';
@@ -65,6 +65,7 @@ if (!function_exists('arborescenceSearchIndexCacheKey')) {
             : '';
 
         return 'arborescence.search-index.' . md5(json_encode([
+            'branchSorts' => $branchSorts,
             'flags' => $flags,
             'language' => $language,
             'root' => $rootPage,
@@ -80,40 +81,113 @@ if (!function_exists('arborescenceSearchablePath')) {
     }
 }
 
+if (!function_exists('arborescenceNormalizeBranchId')) {
+    function arborescenceNormalizeBranchId(string $branch): string
+    {
+        $branch = trim($branch);
+        $branch = trim($branch, '/');
+
+        if (str_starts_with($branch, 'pages/') === true) {
+            $branch = substr($branch, strlen('pages/'));
+        }
+
+        return str_replace('+', '/', $branch);
+    }
+}
+
+if (!function_exists('arborescenceNormalizeBranchSorts')) {
+    function arborescenceNormalizeBranchSorts(array|string|null $branchSorts): array
+    {
+        if (is_string($branchSorts) === true) {
+            $decoded = json_decode($branchSorts, true);
+
+            if (is_array($decoded) === true) {
+                $branchSorts = $decoded;
+            } else {
+                return [];
+            }
+        }
+
+        if (is_array($branchSorts) !== true) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($branchSorts as $branch => $sortBy) {
+            if (is_string($branch) !== true && is_numeric($branch) !== true) {
+                continue;
+            }
+
+            if (is_string($sortBy) !== true && is_numeric($sortBy) !== true) {
+                continue;
+            }
+
+            $normalizedBranch = arborescenceNormalizeBranchId((string)$branch);
+            $normalizedSortBy = trim((string)$sortBy);
+
+            if ($normalizedBranch === '' || $normalizedBranch === 'site' || $normalizedSortBy === '') {
+                continue;
+            }
+
+            $normalized[$normalizedBranch] = $normalizedSortBy;
+        }
+
+        return $normalized;
+    }
+}
+
+if (!function_exists('arborescenceBranchSort')) {
+    function arborescenceBranchSort(Site|Page $parent, array $branchSorts = []): string|null
+    {
+        if ($parent instanceof Page !== true) {
+            return null;
+        }
+
+        return $branchSorts[$parent->id()] ?? null;
+    }
+}
+
 if (!function_exists('arborescenceVisibleChildren')) {
-    function arborescenceVisibleChildren(Site|Page $parent, bool $skipHomePage = false): array
+    function arborescenceVisibleChildren(
+        Site|Page $parent,
+        bool $skipHomePage = false,
+        array $branchSorts = []
+    ): array
     {
         $children = $parent
             ->childrenAndDrafts()
-            ->filterBy('isListable', true)
-            ->values();
+            ->filterBy('isListable', true);
 
-        if ($skipHomePage !== true) {
-            return $children;
+        if ($skipHomePage === true) {
+            $homePageId = App::instance()->site()->homePageId();
+
+            $children = $children->filter(
+                fn ($child) => $child instanceof Page && $child->id() !== $homePageId
+            );
         }
 
-        $homePageId = App::instance()->site()->homePageId();
+        if ($sortBy = arborescenceBranchSort($parent, $branchSorts)) {
+            $children = $children->sort(...$children::sortArgs($sortBy));
+        }
 
-        return array_values(array_filter(
-            $children,
-            fn ($child) => $child instanceof Page && $child->id() !== $homePageId
-        ));
+        return $children->values();
     }
 }
 
 if (!function_exists('arborescenceTopLevelEntries')) {
-    function arborescenceTopLevelEntries(string $rootPage): array
+    function arborescenceTopLevelEntries(string $rootPage, array $branchSorts = []): array
     {
         $root = arborescenceRootModel($rootPage);
         if ($root === null) {
             return [];
         }
 
-        $tree = new ArborescencePageTree();
+        $tree = new ArborescencePageTree($branchSorts);
 
         return array_map(
             fn (Page $page) => $tree->entry($page),
-            arborescenceVisibleChildren($root, $rootPage === 'site')
+            arborescenceVisibleChildren($root, $rootPage === 'site', $branchSorts)
         );
     }
 }
@@ -169,15 +243,20 @@ if (!function_exists('arborescenceParentOpenTarget')) {
 }
 
 if (!function_exists('arborescenceTreePayload')) {
-    function arborescenceTreePayload(string $rootPage, bool $showParent = true): array
+    function arborescenceTreePayload(
+        string $rootPage,
+        bool $showParent = true,
+        array $branchSorts = []
+    ): array
     {
         $model = arborescenceRootModel($rootPage);
 
         return [
+            'branchSorts' => $branchSorts,
             'headline' => null,
             'isSite' => $model instanceof Site,
             'label' => null,
-            'pages' => arborescenceTopLevelEntries($rootPage),
+            'pages' => arborescenceTopLevelEntries($rootPage, $branchSorts),
             'parentIcon' => arborescenceParentIcon($rootPage, $model),
             'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
             'parentTitle' => arborescenceParentTitle($rootPage, $model),
@@ -209,28 +288,30 @@ if (!function_exists('arborescenceCollectSearchIndex')) {
     function arborescenceCollectSearchIndex(
         Page $page,
         string|null $parentId,
-        array &$records
+        array &$records,
+        array $branchSorts = []
     ): void {
         $records[] = arborescenceSearchIndexRecord(
             page: $page,
             parentId: $parentId
         );
 
-        foreach (arborescenceVisibleChildren($page) as $child) {
+        foreach (arborescenceVisibleChildren($page, false, $branchSorts) as $child) {
             arborescenceCollectSearchIndex(
                 page: $child,
                 parentId: $page->id(),
-                records: $records
+                records: $records,
+                branchSorts: $branchSorts
             );
         }
     }
 }
 
 if (!function_exists('arborescenceSearchIndex')) {
-    function arborescenceSearchIndex(string $rootPage): array
+    function arborescenceSearchIndex(string $rootPage, array $branchSorts = []): array
     {
         $cache = App::instance()->cache('pages');
-        $cacheKey = arborescenceSearchIndexCacheKey($rootPage);
+        $cacheKey = arborescenceSearchIndexCacheKey($rootPage, $branchSorts);
         $cached = $cache->get($cacheKey);
 
         if (is_array($cached) === true) {
@@ -245,11 +326,12 @@ if (!function_exists('arborescenceSearchIndex')) {
             return $records;
         }
 
-        foreach (arborescenceVisibleChildren($root, $rootPage === 'site') as $child) {
+        foreach (arborescenceVisibleChildren($root, $rootPage === 'site', $branchSorts) as $child) {
             arborescenceCollectSearchIndex(
                 page: $child,
                 parentId: null,
-                records: $records
+                records: $records,
+                branchSorts: $branchSorts
             );
         }
 
@@ -260,6 +342,34 @@ if (!function_exists('arborescenceSearchIndex')) {
 
 class ArborescencePageTree extends PageTree
 {
+    public function __construct(
+        protected array $branchSorts = []
+    ) {
+        parent::__construct();
+    }
+
+    public function children(
+        string|null $parent = null,
+        string|null $moving = null
+    ): array {
+        if ($moving !== null) {
+            $moving = Find::parent($moving);
+        }
+
+        if ($parent === null) {
+            return [
+                $this->entry($this->site, $moving)
+            ];
+        }
+
+        $parentModel = Find::parent($parent);
+
+        return array_map(
+            fn (Page $page) => $this->entry($page, $moving),
+            arborescenceVisibleChildren($parentModel, false, $this->branchSorts)
+        );
+    }
+
     public function entry(Site|Page $entry, Page|null $moving = null): array
     {
         $data = parent::entry($entry, $moving);
@@ -304,6 +414,9 @@ Kirby::plugin(
                     'showParent' => function (bool $showParent = true) {
                         return $showParent;
                     },
+                    'branchSorts' => function (array|string|null $branchSorts = null) {
+                        return arborescenceNormalizeBranchSorts($branchSorts);
+                    },
                 ],
                 'computed' => [
                     'parentIcon' => function () {
@@ -342,7 +455,7 @@ Kirby::plugin(
                         return 'pages/' . str_replace('/', '+', $model->id());
                     },
                     'pages' => function () {
-                        return arborescenceTopLevelEntries($this->rootPage());
+                        return arborescenceTopLevelEntries($this->rootPage(), $this->branchSorts());
                     },
                     'activePage' => function () {
                         return;
@@ -361,8 +474,25 @@ Kirby::plugin(
                     'action' => function () {
                         $rootPage = trim((string)$this->requestQuery('root'));
                         $showParent = $this->requestQuery('showParent') !== '0';
+                        $branchSorts = arborescenceNormalizeBranchSorts(
+                            $this->requestQuery('branchSorts')
+                        );
 
-                        return arborescenceTreePayload($rootPage, $showParent);
+                        return arborescenceTreePayload($rootPage, $showParent, $branchSorts);
+                    },
+                ],
+                [
+                    'pattern' => 'arborescence/children',
+                    'method' => 'GET',
+                    'action' => function () {
+                        $branchSorts = arborescenceNormalizeBranchSorts(
+                            $this->requestQuery('branchSorts')
+                        );
+
+                        return (new ArborescencePageTree($branchSorts))->children(
+                            parent: $this->requestQuery('parent'),
+                            moving: $this->requestQuery('move'),
+                        );
                     },
                 ],
                 [
@@ -370,9 +500,12 @@ Kirby::plugin(
                     'method' => 'GET',
                     'action' => function () {
                         $rootPage = trim((string)$this->requestQuery('root'));
+                        $branchSorts = arborescenceNormalizeBranchSorts(
+                            $this->requestQuery('branchSorts')
+                        );
 
                         return [
-                            'searchIndex' => arborescenceSearchIndex($rootPage),
+                            'searchIndex' => arborescenceSearchIndex($rootPage, $branchSorts),
                         ];
                     },
                 ],
