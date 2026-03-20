@@ -135,6 +135,14 @@ export default {
       type: Object,
       default: () => ({}),
     },
+    expandedLookup: {
+      type: Object,
+      default: () => ({}),
+    },
+    restoreExpanded: {
+      type: Boolean,
+      default: false,
+    },
     showPaths: {
       type: Boolean,
       default: true,
@@ -169,6 +177,7 @@ export default {
   async mounted() {
     if (this.items) {
       this.state = this.normalizeItems(this.items);
+      await this.restoreExpandedItems();
       return;
     }
 
@@ -293,6 +302,26 @@ export default {
       this.$set(item, "loading", false);
       this.$emit("open", item);
       return true;
+    },
+    async restoreExpandedItems(items = this.state) {
+      if (this.restoreExpanded !== true || Array.isArray(items) !== true) {
+        return;
+      }
+
+      for (const item of items) {
+        if (this.shouldRestoreExpandedItem(item) !== true) {
+          continue;
+        }
+
+        await this.open(item);
+      }
+    },
+    shouldRestoreExpandedItem(item) {
+      return item?.hasChildren === true &&
+        item?.open !== true &&
+        typeof item?.id === "string" &&
+        item.id !== "" &&
+        this.expandedLookup[item.id] === true;
     },
     originalLoad(path) {
       return this.$api.get("arborescence/children", {

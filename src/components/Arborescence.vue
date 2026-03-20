@@ -50,10 +50,14 @@
           v-if="resolvedRoot"
           :key="treeKey"
           :branch-sorts="configuredBranchSorts"
+          :expanded-lookup="browseExpandedLookup"
           :items="displayedTreeItems"
           :level="treeLevel"
           :parent="resolvedRoot"
+          :restore-expanded="isSearchActive !== true"
           :show-paths="resolvedShowPaths"
+          @close="onBrowseClose"
+          @open="onBrowseOpen"
           @select="onSelect"
         />
       </li>
@@ -127,6 +131,7 @@ export default {
       isSite: false,
       label: null,
       defaultTreeItems: null,
+      browseExpandedIds: [],
       parentIcon: null,
       parentOpenTarget: null,
       parentTitle: null,
@@ -147,6 +152,12 @@ export default {
       return this.normalizeBranchSorts(
         this.branchSorts ?? this.standaloneBranchSorts ?? {}
       );
+    },
+    browseExpandedLookup() {
+      return this.browseExpandedIds.reduce((lookup, id) => {
+        lookup[id] = true;
+        return lookup;
+      }, Object.create(null));
     },
     displayedTreeItems() {
       if (this.isSearchActive === true) {
@@ -216,6 +227,13 @@ export default {
 
       return "browse";
     },
+    browseExpansionStorageKey() {
+      const userId = this.$panel?.user?.id ??
+        document.querySelector(".k-panel")?.dataset.user ??
+        "guest";
+
+      return `kirby$arborescence$expanded$${userId}$${this.resolvedRoot}`;
+    },
     serializedBranchSorts() {
       return JSON.stringify(this.configuredBranchSorts);
     },
@@ -223,7 +241,7 @@ export default {
 
   created: async function() {
     const response = await this.loadInitialData();
-    this.applyResponse(response);
+    await this.applyResponse(response);
     this.$nextTick(() => {
       this.loadSearchIndex();
     });
@@ -237,7 +255,7 @@ export default {
   },
 
   methods: {
-    applyResponse(response = {}) {
+    async applyResponse(response = {}) {
       this.branchSorts = response.branchSorts ?? this.standaloneBranchSorts ?? {};
       this.headline = response.headline;
       this.root = response.rootPage ?? this.parent;
@@ -248,7 +266,8 @@ export default {
       this.parentTitle = response.parentTitle;
       this.parentOpenTarget = response.parentOpenTarget ?? null;
       this.isSite = response.isSite;
-      this.defaultTreeItems = response.pages ?? [];
+      this.restoreBrowseExpansionState();
+      this.defaultTreeItems = await this.prepareInitialBrowseTreeItems(response.pages ?? []);
     },
     buildSearchTree(parentId, keptIds, matchesById, subtreeRanks) {
       const items = [];
@@ -462,6 +481,101 @@ export default {
         return branchSorts;
       }, {});
     },
+    persistBrowseExpansionState() {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+
+      try {
+        if (this.browseExpandedIds.length === 0) {
+          localStorage.removeItem(this.browseExpansionStorageKey);
+          return;
+        }
+
+        localStorage.setItem(
+          this.browseExpansionStorageKey,
+          JSON.stringify(this.browseExpandedIds)
+        );
+      } catch (error) {
+        return;
+      }
+    },
+    restoreBrowseExpansionState() {
+      if (typeof localStorage === "undefined") {
+        this.browseExpandedIds = [];
+        return;
+      }
+
+      try {
+        const value = localStorage.getItem(this.browseExpansionStorageKey);
+        const storedIds = value ? JSON.parse(value) : [];
+
+        this.browseExpandedIds = Array.isArray(storedIds) === true
+          ? [...new Set(storedIds.filter((id) => typeof id === "string" && id !== ""))]
+          : [];
+      } catch (error) {
+        this.browseExpandedIds = [];
+      }
+    },
+    async prepareInitialBrowseTreeItems(items) {
+      if (Array.isArray(items) !== true || items.length === 0) {
+        return [];
+      }
+
+      if (this.browseExpandedIds.length === 0) {
+        return items;
+      }
+
+      return this.preloadExpandedBrowseItems(items);
+    },
+    async preloadExpandedBrowseItems(items) {
+      const preparedItems = [];
+
+      for (const item of items) {
+        preparedItems.push(await this.preloadExpandedBrowseItem(item));
+      }
+
+      return preparedItems;
+    },
+    async preloadExpandedBrowseItem(item) {
+      if (!item || typeof item !== "object") {
+        return item;
+      }
+
+      const preparedItem = {
+        ...item,
+      };
+
+      if (Array.isArray(preparedItem.children) === true) {
+        preparedItem.children = await this.preloadExpandedBrowseItems(preparedItem.children);
+        preparedItem.open = preparedItem.children.length > 0 && preparedItem.open === true;
+        return preparedItem;
+      }
+
+      if (
+        preparedItem.hasChildren !== true ||
+        typeof preparedItem.id !== "string" ||
+        preparedItem.id === "" ||
+        this.browseExpandedLookup[preparedItem.id] !== true ||
+        typeof preparedItem.children !== "string"
+      ) {
+        return preparedItem;
+      }
+
+      try {
+        const children = await this.$api.get("arborescence/children", {
+          branchSorts: this.serializedBranchSorts,
+          parent: preparedItem.children,
+        }, null, true);
+
+        preparedItem.children = await this.preloadExpandedBrowseItems(children ?? []);
+        preparedItem.open = true;
+      } catch (error) {
+        return preparedItem;
+      }
+
+      return preparedItem;
+    },
     focusSearch({ select = true } = {}) {
       const input = this.$refs.searchInput?.$el?.querySelector("input");
 
@@ -495,6 +609,36 @@ export default {
       }
 
       return true;
+    },
+    onBrowseClose(item) {
+      if (this.isSearchActive === true) {
+        return;
+      }
+
+      this.updateBrowseExpansionState(item, false);
+    },
+    onBrowseOpen(item) {
+      if (this.isSearchActive === true) {
+        return;
+      }
+
+      this.updateBrowseExpansionState(item, true);
+    },
+    updateBrowseExpansionState(item, isOpen) {
+      if (!item || typeof item.id !== "string" || item.id === "") {
+        return;
+      }
+
+      const descendantsPrefix = `${item.id}/`;
+      const nextExpandedIds = isOpen === true
+        ? [...new Set([...this.browseExpandedIds, item.id])]
+        : this.browseExpandedIds.filter((id) => (
+          id !== item.id &&
+          id.startsWith(descendantsPrefix) !== true
+        ));
+
+      this.browseExpandedIds = nextExpandedIds;
+      this.persistBrowseExpansionState();
     },
     async loadInitialData() {
       if (typeof this.standaloneRootPage === "string" && this.standaloneRootPage !== "") {
