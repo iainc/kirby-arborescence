@@ -246,6 +246,7 @@ if (!function_exists('arborescenceTreePayload')) {
     function arborescenceTreePayload(
         string $rootPage,
         bool $showParent = true,
+        bool $showPaths = true,
         array $branchSorts = []
     ): array
     {
@@ -262,6 +263,7 @@ if (!function_exists('arborescenceTreePayload')) {
             'parentTitle' => arborescenceParentTitle($rootPage, $model),
             'rootPage' => $rootPage,
             'showParent' => $showParent,
+            'showPaths' => $showPaths,
         ];
     }
 }
@@ -377,6 +379,7 @@ class ArborescencePageTree extends PageTree
 
         if ($entry instanceof Page) {
             $data['label'] = arborescencePanelTitle($entry);
+            $data['path'] = arborescenceSearchablePath($entry->id());
             $data['status'] = $entry->status();
         }
 
@@ -415,6 +418,9 @@ Kirby::plugin(
                     },
                     'showParent' => function (bool $showParent = true) {
                         return $showParent;
+                    },
+                    'showPaths' => function (bool $showPaths = true) {
+                        return $showPaths;
                     },
                     'branchSorts' => function (array|string|null $branchSorts = null) {
                         return arborescenceNormalizeBranchSorts($branchSorts);
@@ -476,11 +482,12 @@ Kirby::plugin(
                     'action' => function () {
                         $rootPage = trim((string)$this->requestQuery('root'));
                         $showParent = $this->requestQuery('showParent') !== '0';
+                        $showPaths = $this->requestQuery('showPaths') !== '0';
                         $branchSorts = arborescenceNormalizeBranchSorts(
                             $this->requestQuery('branchSorts')
                         );
 
-                        return arborescenceTreePayload($rootPage, $showParent, $branchSorts);
+                        return arborescenceTreePayload($rootPage, $showParent, $showPaths, $branchSorts);
                     },
                 ],
                 [

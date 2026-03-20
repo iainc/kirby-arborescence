@@ -135,6 +135,10 @@ export default {
       type: Object,
       default: () => ({}),
     },
+    showPaths: {
+      type: Boolean,
+      default: true,
+    },
     level: {
       default: 0,
       type: Number,
@@ -270,7 +274,19 @@ export default {
       return true;
     },
     pathParts(item) {
-      return Array.isArray(item.pathParts) === true ? item.pathParts : [];
+      if (this.showPaths !== true) {
+        return [];
+      }
+
+      if (Array.isArray(item.pathParts) === true && item.pathParts.length > 0) {
+        return item.pathParts;
+      }
+
+      if (typeof item?.path === "string" && item.path !== "") {
+        return [{ text: item.path, match: false }];
+      }
+
+      return [];
     },
     statusIcon(item) {
       switch (item?.status) {

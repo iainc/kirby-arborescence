@@ -15,6 +15,7 @@
       :close-on-select="true"
       standalone-root-page="site"
       :standalone-show-parent="true"
+      :standalone-show-paths="showPaths"
     />
   </k-dialog>
 </template>
@@ -30,6 +31,10 @@ export default {
     branchSorts: {
       type: Object,
       default: () => ({}),
+    },
+    showPaths: {
+      type: Boolean,
+      default: true,
     },
   },
   mounted() {

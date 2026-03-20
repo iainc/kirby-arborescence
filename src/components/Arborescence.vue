@@ -52,6 +52,7 @@
           :items="displayedTreeItems"
           :level="treeLevel"
           :parent="resolvedRoot"
+          :show-paths="resolvedShowPaths"
           @select="onSelect"
         />
       </li>
@@ -108,6 +109,10 @@ export default {
       type: Boolean,
       default: true,
     },
+    standaloneShowPaths: {
+      type: Boolean,
+      default: true,
+    },
     standaloneBranchSorts: {
       type: Object,
       default: null,
@@ -132,6 +137,7 @@ export default {
       searchTreeItems: null,
       searchTreeVersion: 0,
       showParent: true,
+      showPaths: true,
     };
   },
 
@@ -189,6 +195,9 @@ export default {
       return this.showParent === true &&
         (this.isSearchActive !== true || this.hasVisibleSearchResults === true);
     },
+    resolvedShowPaths() {
+      return this.showPaths !== false;
+    },
     treeLevel() {
       return this.showParentBranch === true ? 1 : 0;
     },
@@ -226,6 +235,7 @@ export default {
       this.root = response.rootPage ?? this.parent;
       this.parentIcon = response.parentIcon ?? "folder";
       this.showParent = response.showParent ?? true;
+      this.showPaths = response.showPaths ?? this.standaloneShowPaths ?? true;
       this.label = response.label;
       this.parentTitle = response.parentTitle;
       this.parentOpenTarget = response.parentOpenTarget ?? null;
@@ -259,6 +269,7 @@ export default {
           id: record.id,
           label: record.label,
           open: children.length > 0,
+          path: record.pathLabel ?? record.id,
           pathParts: match?.pathParts ?? null,
           status: record.status ?? null,
           title: record.displayTitle ?? record.label,
@@ -464,6 +475,7 @@ export default {
           branchSorts: this.serializedBranchSorts,
           root: this.standaloneRootPage,
           showParent: this.standaloneShowParent ? "1" : "0",
+          showPaths: this.standaloneShowPaths ? "1" : "0",
         }, null, true);
       }
 
