@@ -18,12 +18,12 @@
         >
           <k-icon :type="arrow(item)" />
         </button>
-        <button
-          :disabled="item.disabled"
+        <component
+          :is="item.disabled === true ? 'span' : 'a'"
+          :aria-disabled="item.disabled === true ? 'true' : null"
+          :href="item.disabled === true ? null : itemPanelHref(item)"
           class="k-tree-folder"
-          type="button"
-          @click="select(item)"
-          @dblclick="toggle(item)"
+          @click="select(item, $event)"
         >
           <k-icon-frame :icon="itemIcon(item)" />
           <span
@@ -80,7 +80,7 @@
           >
             <k-icon :type="statusIcon(item)" />
           </span>
-        </button>
+        </component>
       </p>
       <template v-if="item.hasChildren && item.open">
         <component
@@ -200,6 +200,41 @@ export default {
     },
     itemIcon(item) {
       return item.icon || "folder";
+    },
+    isPlainLeftClick(event) {
+      if (!event) {
+        return true;
+      }
+
+      if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) {
+        return false;
+      }
+
+      if (event.defaultPrevented === true) {
+        return false;
+      }
+
+      if (event.button !== undefined && event.button !== 0) {
+        return false;
+      }
+
+      return true;
+    },
+    itemPanelPath(item) {
+      if (typeof item?.id !== "string" || item.id === "") {
+        return null;
+      }
+
+      return `/pages/${item.id.replaceAll("/", "+")}`;
+    },
+    itemPanelHref(item) {
+      const path = this.itemPanelPath(item);
+
+      if (path === null) {
+        return null;
+      }
+
+      return this.$url(path);
     },
     featureFlagParts(item) {
       if (Array.isArray(item.flagParts) === true) {
@@ -366,7 +401,12 @@ export default {
         this.$emit("select", item);
       }
     },
-    select(item) {
+    select(item, event = null) {
+      if (event && this.isPlainLeftClick(event) !== true) {
+        return;
+      }
+
+      event?.preventDefault();
       this.$emit("select", item);
     },
     toggle(item) {

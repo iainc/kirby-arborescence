@@ -35,15 +35,16 @@
           >
             <k-icon type="angle-down" />
           </button>
-          <button
+          <component
+            :is="parentOpenTarget ? 'a' : 'span'"
+            :aria-disabled="parentOpenTarget ? null : 'true'"
+            :href="parentOpenTarget ? parentLinkHref : null"
             class="k-tree-folder"
-            :disabled="!parentOpenTarget"
-            type="button"
             @click="openParent"
           >
             <k-icon-frame :icon="parentIcon" />
             <span class="k-tree-folder-label">{{ parentTitle }}</span>
-          </button>
+          </component>
         </p>
         <page-tree-menu
           v-if="resolvedRoot"
@@ -194,6 +195,13 @@ export default {
     showParentBranch() {
       return this.showParent === true &&
         (this.isSearchActive !== true || this.hasVisibleSearchResults === true);
+    },
+    parentLinkHref() {
+      if (!this.parentOpenTarget) {
+        return null;
+      }
+
+      return this.$url(`/${this.parentOpenTarget}`);
     },
     resolvedShowPaths() {
       return this.showPaths !== false;
@@ -469,6 +477,25 @@ export default {
 
       return true;
     },
+    isPlainLeftClick(event) {
+      if (!event) {
+        return true;
+      }
+
+      if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) {
+        return false;
+      }
+
+      if (event.defaultPrevented === true) {
+        return false;
+      }
+
+      if (event.button !== undefined && event.button !== 0) {
+        return false;
+      }
+
+      return true;
+    },
     async loadInitialData() {
       if (typeof this.standaloneRootPage === "string" && this.standaloneRootPage !== "") {
         return this.$api.get("arborescence/tree", {
@@ -481,11 +508,16 @@ export default {
 
       return this.load();
     },
-    openParent() {
+    openParent(event = null) {
       if (!this.parentOpenTarget) {
         return;
       }
 
+      if (event && this.isPlainLeftClick(event) !== true) {
+        return;
+      }
+
+      event?.preventDefault();
       window.panel.open(this.parentOpenTarget);
 
       if (this.closeOnSelect === true) {
@@ -814,6 +846,11 @@ export default {
 </script>
 
 <style>
+.k-arborescence-section .k-tree-folder {
+  color: inherit;
+  text-decoration: none;
+}
+
 .k-arborescence-search {
   margin-bottom: var(--spacing-4);
 }
