@@ -5,7 +5,7 @@
     :visible="true"
     class="k-arborescence-search-dialog"
     role="search"
-    size="medium"
+    size="large"
     @cancel="close"
   >
     <arborescence
@@ -54,7 +54,7 @@ export default {
 .k-arborescence-search-dialog {
   --arborescence-dialog-inset: var(--spacing-2);
   --dialog-padding: 0;
-  --dialog-width: 32rem;
+  --dialog-width: 40rem;
   --dialog-rounded: var(--rounded-xl);
   block-size: min(36rem, calc(100dvh - 2 * var(--dialog-margin)));
   overflow: hidden;
