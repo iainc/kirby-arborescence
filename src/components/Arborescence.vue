@@ -14,6 +14,15 @@
         <template slot="before">
           <k-icon type="search" />
         </template>
+        <template v-if="hasSearchQueryValue" slot="icon">
+          <k-button
+            icon="cancel-small"
+            tabindex="-1"
+            title="Clear search"
+            @click="clearSearch"
+            @mousedown.native.prevent
+          />
+        </template>
       </k-input>
     </div>
 
@@ -157,6 +166,9 @@ export default {
         Array.isArray(this.displayedTreeItems) === true &&
         this.displayedTreeItems.length > 0;
     },
+    hasSearchQueryValue() {
+      return this.searchQuery !== "";
+    },
     trimmedSearchQuery() {
       return this.normalizeSearchValue(this.searchQuery).trim();
     },
@@ -279,6 +291,14 @@ export default {
       this.searchRequestToken += 1;
       this.searchTreeItems = [];
       this.searchTreeVersion += 1;
+    },
+    clearSearch() {
+      this.searchQuery = "";
+      this.persistSearchQueryState();
+      this.updateSearchResults();
+      this.$nextTick(() => {
+        this.focusSearch({ select: false });
+      });
     },
     async syncSearchIndex(records) {
       if (!this.searchWorker) {
