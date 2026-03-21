@@ -121,6 +121,90 @@ function parseFeatureFlagLabel(value) {
   };
 }
 
+function featureFlagTitlePrefix(flag) {
+  if (typeof flag !== "string" || flag === "") {
+    return null;
+  }
+
+  return `${flag}: `;
+}
+
+function featureFlagTitlePrefixLength(value, flag) {
+  if (typeof value !== "string" || typeof flag !== "string" || flag === "") {
+    return 0;
+  }
+
+  const parsedLabel = parseFeatureFlagLabel(value);
+
+  if (parsedLabel?.flag === flag) {
+    return FEATURE_FLAG_MARKER.length + featureFlagTitlePrefix(flag).length;
+  }
+
+  const prefix = featureFlagTitlePrefix(flag);
+
+  if (prefix !== null && value.startsWith(prefix) === true) {
+    return prefix.length;
+  }
+
+  return 0;
+}
+
+function stripFeatureFlagTitlePrefix(value, flag) {
+  const prefixLength = featureFlagTitlePrefixLength(value, flag);
+
+  if (prefixLength === 0) {
+    return value;
+  }
+
+  return value.slice(prefixLength);
+}
+
+function stripFeatureFlagTitleParts(parts, flag) {
+  if (Array.isArray(parts) !== true) {
+    return parts;
+  }
+
+  const fullText = parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("");
+
+  const prefixLength = featureFlagTitlePrefixLength(fullText, flag);
+
+  if (prefixLength === 0) {
+    return parts;
+  }
+
+  let remainingPrefix = prefixLength;
+  const trimmedParts = [];
+
+  for (const part of parts) {
+    const text = typeof part?.text === "string" ? part.text : "";
+
+    if (text === "") {
+      continue;
+    }
+
+    if (remainingPrefix >= text.length) {
+      remainingPrefix -= text.length;
+      continue;
+    }
+
+    const trimmedText = remainingPrefix > 0 ? text.slice(remainingPrefix) : text;
+    remainingPrefix = 0;
+
+    if (trimmedText === "") {
+      continue;
+    }
+
+    trimmedParts.push({
+      ...part,
+      text: trimmedText,
+    });
+  }
+
+  return trimmedParts;
+}
+
 export default {
   name: "page-tree-menu",
   inheritAttrs: false,
@@ -263,15 +347,19 @@ export default {
       return null;
     },
     itemTitle(item) {
+      const featureFlag = this.itemFeatureFlag(item);
+
       if (typeof item.title === "string" && item.title !== "") {
-        return item.title;
+        return stripFeatureFlagTitlePrefix(item.title, featureFlag);
       }
 
-      return item.label;
+      return stripFeatureFlagTitlePrefix(item.label, featureFlag);
     },
     labelParts(item) {
+      const featureFlag = this.itemFeatureFlag(item);
+
       return Array.isArray(item.titleParts) === true
-        ? item.titleParts
+        ? stripFeatureFlagTitleParts(item.titleParts, featureFlag)
         : [{ text: this.itemTitle(item), match: false }];
     },
     async load(path) {
@@ -375,12 +463,16 @@ export default {
       }
 
       const parsedLabel = parseFeatureFlagLabel(item.label);
-      const title = typeof item.title === "string" && item.title !== ""
-        ? item.title
-        : parsedLabel?.title ?? item.label;
       const featureFlag = typeof item.featureFlag === "string" && item.featureFlag !== ""
         ? item.featureFlag
         : parsedLabel?.flag ?? null;
+      const title = stripFeatureFlagTitlePrefix(
+        typeof item.title === "string" && item.title !== ""
+          ? item.title
+          : parsedLabel?.title ?? item.label,
+        featureFlag
+      );
+      const titleParts = stripFeatureFlagTitleParts(item.titleParts, featureFlag);
       const children = Array.isArray(item.children) === true
         ? this.normalizeItems(item.children)
         : item.children;
@@ -390,6 +482,7 @@ export default {
         children,
         featureFlag,
         title,
+        titleParts,
       };
     },
     normalizeItems(items) {

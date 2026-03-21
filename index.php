@@ -7,6 +7,10 @@ use Kirby\Cms\Site;
 use Kirby\Panel\Controller\PageTree;
 use Kirby\Toolkit\I18n;
 
+if (!defined('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION')) {
+    define('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION', 2);
+}
+
 if (!function_exists('arborescencePanelTitle')) {
     function arborescencePanelTitle(Page $page): string
     {
@@ -54,23 +58,163 @@ if (!function_exists('arborescenceRootModel')) {
     }
 }
 
-if (!function_exists('arborescenceSearchIndexCacheKey')) {
-    function arborescenceSearchIndexCacheKey(string $rootPage, array $branchSorts = []): string
+if (!function_exists('arborescenceSearchIndexScope')) {
+    function arborescenceSearchIndexScope(string $rootPage, array $branchSorts = []): string
     {
         $app = App::instance();
         $language = $app->language()?->code() ?? 'default';
         $user = $app->user()?->id() ?? 'guest';
         $flags = function_exists('ia_feature_flags_active_flags') === true
-            ? implode(',', ia_feature_flags_active_flags())
-            : '';
+            ? ia_feature_flags_active_flags()
+            : [];
 
-        return 'arborescence.search-index.' . md5(json_encode([
-            'branchSorts' => $branchSorts,
-            'flags' => $flags,
+        if (is_array($flags) !== true) {
+            $flags = [];
+        }
+
+        $normalizedBranchSorts = $branchSorts;
+        ksort($normalizedBranchSorts);
+
+        $normalizedFlags = array_values(
+            array_filter(
+                array_map(fn ($flag) => is_string($flag) ? trim($flag) : '', $flags),
+                fn (string $flag) => $flag !== ''
+            )
+        );
+        sort($normalizedFlags);
+
+        return md5(json_encode([
+            'branchSorts' => $normalizedBranchSorts,
+            'flags' => $normalizedFlags,
+            'formatVersion' => ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION,
             'language' => $language,
             'root' => $rootPage,
             'user' => $user,
         ]));
+    }
+}
+
+if (!function_exists('arborescenceContentGitDirectory')) {
+    function arborescenceContentGitDirectory(string $repoRoot): string|null
+    {
+        $gitPath = rtrim($repoRoot, '/') . '/.git';
+
+        if (is_dir($gitPath) === true) {
+            return $gitPath;
+        }
+
+        if (is_file($gitPath) !== true) {
+            return null;
+        }
+
+        $gitFile = trim((string)@file_get_contents($gitPath));
+        if (str_starts_with($gitFile, 'gitdir: ') !== true) {
+            return null;
+        }
+
+        $relativeGitPath = trim(substr($gitFile, strlen('gitdir: ')));
+        if ($relativeGitPath === '') {
+            return null;
+        }
+
+        $resolvedGitPath = str_starts_with($relativeGitPath, '/') === true
+            ? $relativeGitPath
+            : dirname($gitPath) . '/' . $relativeGitPath;
+
+        return is_dir($resolvedGitPath) === true ? $resolvedGitPath : null;
+    }
+}
+
+if (!function_exists('arborescencePackedRefRevision')) {
+    function arborescencePackedRefRevision(string $gitDirectory, string $reference): string|null
+    {
+        $packedRefsPath = $gitDirectory . '/packed-refs';
+        if (is_readable($packedRefsPath) !== true) {
+            return null;
+        }
+
+        $packedRefs = @file($packedRefsPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (is_array($packedRefs) !== true) {
+            return null;
+        }
+
+        foreach ($packedRefs as $line) {
+            if ($line === '' || $line[0] === '#' || $line[0] === '^') {
+                continue;
+            }
+
+            [$hash, $name] = array_pad(preg_split('/\s+/', trim($line), 2), 2, null);
+
+            if ($name === $reference && is_string($hash) === true && preg_match('/^[a-f0-9]{40}$/i', $hash) === 1) {
+                return strtolower($hash);
+            }
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('arborescenceSearchIndexRevision')) {
+    function arborescenceSearchIndexRevision(): string|null
+    {
+        static $revision = false;
+
+        if ($revision !== false) {
+            return $revision;
+        }
+
+        $revision = null;
+        $repoRoot = trim((string)option('thathoff.git-content.path', App::instance()->root('content')));
+        if ($repoRoot === '') {
+            return null;
+        }
+
+        $gitDirectory = arborescenceContentGitDirectory($repoRoot);
+        if ($gitDirectory === null) {
+            return null;
+        }
+
+        $head = trim((string)@file_get_contents($gitDirectory . '/HEAD'));
+        if ($head === '') {
+            return null;
+        }
+
+        if (preg_match('/^[a-f0-9]{40}$/i', $head) === 1) {
+            $revision = strtolower($head);
+            return $revision;
+        }
+
+        if (str_starts_with($head, 'ref: ') !== true) {
+            return null;
+        }
+
+        $reference = trim(substr($head, strlen('ref: ')));
+        if ($reference === '') {
+            return null;
+        }
+
+        $referencePath = $gitDirectory . '/' . $reference;
+        $resolvedReference = trim((string)@file_get_contents($referencePath));
+
+        if (preg_match('/^[a-f0-9]{40}$/i', $resolvedReference) === 1) {
+            $revision = strtolower($resolvedReference);
+            return $revision;
+        }
+
+        $revision = arborescencePackedRefRevision($gitDirectory, $reference);
+        return $revision;
+    }
+}
+
+if (!function_exists('arborescenceSearchIndexCacheKey')) {
+    function arborescenceSearchIndexCacheKey(string $rootPage, array $branchSorts = []): string
+    {
+        $revision = arborescenceSearchIndexRevision() ?? 'unknown';
+
+        return 'arborescence.search-index.' .
+            arborescenceSearchIndexScope($rootPage, $branchSorts) .
+            '.' .
+            $revision;
     }
 }
 
@@ -133,6 +277,7 @@ if (!function_exists('arborescenceNormalizeBranchSorts')) {
             $normalized[$normalizedBranch] = $normalizedSortBy;
         }
 
+        ksort($normalized);
         return $normalized;
     }
 }
@@ -247,12 +392,13 @@ if (!function_exists('arborescenceTreePayload')) {
         string $rootPage,
         bool $showParent = true,
         bool $showPaths = true,
-        array $branchSorts = []
+        array $branchSorts = [],
+        bool $includeSearchIndex = false
     ): array
     {
         $model = arborescenceRootModel($rootPage);
 
-        return [
+        $payload = [
             'branchSorts' => $branchSorts,
             'headline' => null,
             'isSite' => $model instanceof Site,
@@ -261,10 +407,18 @@ if (!function_exists('arborescenceTreePayload')) {
             'parentIcon' => arborescenceParentIcon($rootPage, $model),
             'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
             'parentTitle' => arborescenceParentTitle($rootPage, $model),
+            'searchIndexRevision' => arborescenceSearchIndexRevision(),
+            'searchIndexScope' => arborescenceSearchIndexScope($rootPage, $branchSorts),
             'rootPage' => $rootPage,
             'showParent' => $showParent,
             'showPaths' => $showPaths,
         ];
+
+        if ($includeSearchIndex === true) {
+            $payload['searchIndex'] = arborescenceSearchIndex($rootPage, $branchSorts);
+        }
+
+        return $payload;
     }
 }
 
@@ -314,8 +468,11 @@ if (!function_exists('arborescenceSearchIndex')) {
     function arborescenceSearchIndex(string $rootPage, array $branchSorts = []): array
     {
         $cache = App::instance()->cache('pages');
-        $cacheKey = arborescenceSearchIndexCacheKey($rootPage, $branchSorts);
-        $cached = $cache->get($cacheKey);
+        $cacheKey = arborescenceSearchIndexRevision() !== null
+            ? arborescenceSearchIndexCacheKey($rootPage, $branchSorts)
+            : null;
+
+        $cached = $cacheKey !== null ? $cache->get($cacheKey) : null;
 
         if (is_array($cached) === true) {
             return $cached;
@@ -325,7 +482,9 @@ if (!function_exists('arborescenceSearchIndex')) {
         $records = [];
 
         if ($root === null) {
-            $cache->set($cacheKey, $records);
+            if ($cacheKey !== null) {
+                $cache->set($cacheKey, $records);
+            }
             return $records;
         }
 
@@ -338,7 +497,9 @@ if (!function_exists('arborescenceSearchIndex')) {
             );
         }
 
-        $cache->set($cacheKey, $records);
+        if ($cacheKey !== null) {
+            $cache->set($cacheKey, $records);
+        }
         return $records;
     }
 }
@@ -465,6 +626,12 @@ Kirby::plugin(
                     'pages' => function () {
                         return arborescenceTopLevelEntries($this->rootPage(), $this->branchSorts());
                     },
+                    'searchIndexRevision' => function () {
+                        return arborescenceSearchIndexRevision();
+                    },
+                    'searchIndexScope' => function () {
+                        return arborescenceSearchIndexScope($this->rootPage(), $this->branchSorts());
+                    },
                     'activePage' => function () {
                         return;
                     },
@@ -481,13 +648,20 @@ Kirby::plugin(
                     'method' => 'GET',
                     'action' => function () {
                         $rootPage = trim((string)$this->requestQuery('root'));
+                        $includeSearchIndex = $this->requestQuery('includeSearchIndex') === '1';
                         $showParent = $this->requestQuery('showParent') !== '0';
                         $showPaths = $this->requestQuery('showPaths') !== '0';
                         $branchSorts = arborescenceNormalizeBranchSorts(
                             $this->requestQuery('branchSorts')
                         );
 
-                        return arborescenceTreePayload($rootPage, $showParent, $showPaths, $branchSorts);
+                        return arborescenceTreePayload(
+                            $rootPage,
+                            $showParent,
+                            $showPaths,
+                            $branchSorts,
+                            $includeSearchIndex
+                        );
                     },
                 ],
                 [
@@ -514,6 +688,8 @@ Kirby::plugin(
                         );
 
                         return [
+                            'searchIndexRevision' => arborescenceSearchIndexRevision(),
+                            'searchIndexScope' => arborescenceSearchIndexScope($rootPage, $branchSorts),
                             'searchIndex' => arborescenceSearchIndex($rootPage, $branchSorts),
                         ];
                     },
