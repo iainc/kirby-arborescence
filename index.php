@@ -8,7 +8,7 @@ use Kirby\Panel\Controller\PageTree;
 use Kirby\Toolkit\I18n;
 
 if (!defined('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION')) {
-    define('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION', 2);
+    define('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION', 3);
 }
 
 if (!function_exists('arborescencePanelTitle')) {
@@ -225,6 +225,37 @@ if (!function_exists('arborescenceSearchablePath')) {
     }
 }
 
+if (!function_exists('arborescenceCanChangeSort')) {
+    function arborescenceCanChangeSort(Page $page): bool
+    {
+        if ($page->permissions()->can('sort') !== true) {
+            return false;
+        }
+
+        return $page->parentModel()->children()->listed()->not($page)->count() > 0;
+    }
+}
+
+if (!function_exists('arborescencePageMenuData')) {
+    function arborescencePageMenuData(Page $page): array
+    {
+        return [
+            'canChangeSlug' => $page->permissions()->can('changeSlug'),
+            'canChangeSort' => arborescenceCanChangeSort($page),
+            'canChangeStatus' => $page->permissions()->can('changeStatus'),
+            'canChangeTitle' => $page->permissions()->can('changeTitle'),
+            'canCreate' => $page->permissions()->can('create'),
+            'canDelete' => $page->permissions()->can('delete'),
+            'canDuplicate' => $page->permissions()->can('duplicate'),
+            'label' => arborescencePanelTitle($page),
+            'openUrl' => $page->previewUrl(),
+            'panelUrl' => $page->panel()->url(true),
+            'path' => arborescenceSearchablePath($page->id()),
+            'status' => $page->status(),
+        ];
+    }
+}
+
 if (!function_exists('arborescenceNormalizeBranchId')) {
     function arborescenceNormalizeBranchId(string $branch): string
     {
@@ -387,6 +418,24 @@ if (!function_exists('arborescenceParentOpenTarget')) {
     }
 }
 
+if (!function_exists('arborescenceParentOpenUrl')) {
+    function arborescenceParentOpenUrl(string $rootPage, Site|Page|null $model = null): string|null
+    {
+        if ($rootPage === 'site') {
+            return App::instance()->site()->url();
+        }
+
+        $model ??= arborescenceRootModel($rootPage);
+        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
+
+        if ($parent instanceof Page) {
+            return $parent->previewUrl() ?? $parent->url();
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('arborescenceTreePayload')) {
     function arborescenceTreePayload(
         string $rootPage,
@@ -406,6 +455,7 @@ if (!function_exists('arborescenceTreePayload')) {
             'pages' => arborescenceTopLevelEntries($rootPage, $branchSorts),
             'parentIcon' => arborescenceParentIcon($rootPage, $model),
             'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
+            'parentOpenUrl' => arborescenceParentOpenUrl($rootPage, $model),
             'parentTitle' => arborescenceParentTitle($rootPage, $model),
             'searchIndexRevision' => arborescenceSearchIndexRevision(),
             'searchIndexScope' => arborescenceSearchIndexScope($rootPage, $branchSorts),
@@ -428,13 +478,11 @@ if (!function_exists('arborescenceSearchIndexRecord')) {
         $uuid = $page->uuid()?->toString();
 
         return [
+            ...arborescencePageMenuData($page),
             'icon' => $page->panel()->image()['icon'] ?? null,
             'id' => $page->id(),
-            'label' => arborescencePanelTitle($page),
             'parentId' => $parentId,
-            'path' => arborescenceSearchablePath($page->id()),
             'slug' => $page->slug(),
-            'status' => $page->status(),
             'uuid' => $uuid,
             'value' => $uuid ?? $page->id(),
         ];
@@ -539,9 +587,10 @@ class ArborescencePageTree extends PageTree
         $data = parent::entry($entry, $moving);
 
         if ($entry instanceof Page) {
-            $data['label'] = arborescencePanelTitle($entry);
-            $data['path'] = arborescenceSearchablePath($entry->id());
-            $data['status'] = $entry->status();
+            $data = [
+                ...$data,
+                ...arborescencePageMenuData($entry),
+            ];
         }
 
         return $data;
@@ -622,6 +671,9 @@ Kirby::plugin(
                         }
 
                         return 'pages/' . str_replace('/', '+', $model->id());
+                    },
+                    'parentOpenUrl' => function () {
+                        return arborescenceParentOpenUrl($this->rootPage(), $this->model());
                     },
                     'pages' => function () {
                         return arborescenceTopLevelEntries($this->rootPage(), $this->branchSorts());

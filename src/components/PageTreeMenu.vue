@@ -81,6 +81,13 @@
             <k-icon :type="statusIcon(item)" />
           </span>
         </component>
+        <k-options-dropdown
+          v-if="hasItemOptions(item)"
+          :options="itemOptions(item)"
+          class="k-tree-branch-options"
+          size="sm"
+          @click.native.stop
+        />
       </p>
       <template v-if="item.hasChildren && item.open">
         <component
@@ -321,13 +328,38 @@ export default {
       return `/pages/${item.id.replaceAll("/", "+")}`;
     },
     itemPanelHref(item) {
-      const path = this.itemPanelPath(item);
+      const path = typeof item?.panelUrl === "string" && item.panelUrl !== ""
+        ? item.panelUrl
+        : this.itemPanelPath(item);
 
       if (path === null) {
         return null;
       }
 
       return this.$url(path);
+    },
+    itemPreviewHref(item) {
+      const panelHref = this.itemPanelHref(item);
+
+      if (panelHref === null) {
+        return null;
+      }
+
+      return `${panelHref}/preview/changes`;
+    },
+    itemDialogPath(item, action) {
+      const panelPath = this.itemPanelPath(item);
+
+      if (panelPath === null) {
+        return null;
+      }
+
+      return `${panelPath.slice(1)}/${action}`;
+    },
+    hasItemOptions(item) {
+      return this.move == null &&
+        typeof item?.id === "string" &&
+        item.id !== "";
     },
     featureFlagParts(item) {
       if (Array.isArray(item.flagParts) === true) {
@@ -424,6 +456,126 @@ export default {
       this.$set(item, "loading", false);
       this.$emit("open", item);
       return true;
+    },
+    createChild(item) {
+      const parent = this.itemPanelPath(item);
+      const view = typeof window?.panel?.view?.path === "string" && window.panel.view.path !== ""
+        ? window.panel.view.path
+        : null;
+      const query = {};
+
+      if (parent === null) {
+        return;
+      }
+
+      query.parent = parent;
+
+      if (view !== null) {
+        query.view = view;
+      }
+
+      this.$panel.dialog.open("pages/create", {
+        query,
+      });
+    },
+    openItemDialog(item, action) {
+      const path = this.itemDialogPath(item, action);
+
+      if (path === null) {
+        return;
+      }
+
+      this.$panel.dialog.open(path);
+    },
+    openItemDialogWithQuery(item, action, query) {
+      const path = this.itemDialogPath(item, action);
+
+      if (path === null) {
+        return;
+      }
+
+      this.$panel.dialog.open(path, {
+        query,
+      });
+    },
+    itemOptions(item) {
+      const options = [];
+      const openUrl = typeof item?.openUrl === "string" && item.openUrl !== ""
+        ? item.openUrl
+        : null;
+      const previewUrl = this.itemPreviewHref(item);
+
+      options.push({
+        disabled: openUrl === null,
+        icon: "open",
+        link: openUrl,
+        target: "_blank",
+        text: this.$t("open"),
+      });
+
+      options.push({
+        disabled: openUrl === null || previewUrl === null,
+        icon: "window",
+        link: previewUrl,
+        text: this.$t("preview"),
+      });
+
+      options.push("-");
+
+      options.push({
+        click: () => this.openItemDialogWithQuery(item, "changeTitle", { select: "title" }),
+        disabled: item?.canChangeTitle !== true,
+        icon: "title",
+        text: this.$t("rename"),
+      });
+
+      options.push({
+        click: () => this.openItemDialogWithQuery(item, "changeTitle", { select: "slug" }),
+        disabled: item?.canChangeSlug !== true,
+        icon: "url",
+        text: this.$t("page.changeSlug"),
+      });
+
+      options.push({
+        click: () => this.openItemDialog(item, "changeStatus"),
+        disabled: item?.canChangeStatus !== true,
+        icon: "preview",
+        text: this.$t("page.changeStatus"),
+      });
+
+      options.push({
+        click: () => this.openItemDialog(item, "changeSort"),
+        disabled: item?.canChangeSort !== true,
+        icon: "sort",
+        text: this.$t("page.sort"),
+      });
+
+      options.push("-");
+
+      options.push({
+        click: () => this.createChild(item),
+        disabled: item?.canCreate !== true,
+        icon: "add",
+        text: "New child page",
+      });
+
+      options.push({
+        click: () => this.openItemDialog(item, "duplicate"),
+        disabled: item?.canDuplicate !== true,
+        icon: "copy",
+        text: this.$t("duplicate"),
+      });
+
+      options.push("-");
+
+      options.push({
+        click: () => this.openItemDialog(item, "delete"),
+        disabled: item?.canDelete !== true,
+        icon: "trash",
+        text: this.$t("delete"),
+      });
+
+      return options;
     },
     pathParts(item) {
       if (this.showPaths !== true) {
@@ -545,11 +697,23 @@ export default {
 </script>
 
 <style>
+.page-tree-menu .k-tree-branch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .page-tree-menu .k-tree-folder {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
+  min-width: 0;
   text-align: left;
+}
+
+.page-tree-menu .k-tree-branch-options {
+  justify-self: end;
 }
 
 .page-tree-menu .k-tree-folder-copy {

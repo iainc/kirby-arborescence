@@ -36,7 +36,7 @@
         :aria-expanded="true"
         :aria-current="false"
       >
-        <p v-if="showParentBranch" class="k-tree-branch">
+        <p v-if="showParentBranch" class="k-tree-branch k-arborescence-parent-branch">
           <button
             class="k-tree-toggle"
             :disabled="false"
@@ -54,6 +54,13 @@
             <k-icon-frame :icon="parentIcon" />
             <span class="k-tree-folder-label">{{ parentTitle }}</span>
           </component>
+          <k-options-dropdown
+            v-if="hasParentOptions"
+            :options="parentOptions"
+            class="k-arborescence-parent-options"
+            size="sm"
+            @click.native.stop
+          />
         </p>
         <page-tree-menu
           v-if="resolvedRoot"
@@ -125,6 +132,7 @@ export default {
       browseExpandedIds: [],
       parentIcon: null,
       parentOpenTarget: null,
+      parentOpenUrl: null,
       parentTitle: null,
       root: "",
       searchIndexRevision: null,
@@ -209,6 +217,39 @@ export default {
 
       return this.$url(`/${this.parentOpenTarget}`);
     },
+    hasParentOptions() {
+      return typeof this.parentOpenTarget === "string" &&
+        this.parentOpenTarget !== "";
+    },
+    parentOptions() {
+      const options = [];
+      const previewUrl = this.parentPreviewHref();
+
+      options.push({
+        disabled: this.parentOpenUrl === null,
+        icon: "open",
+        link: this.parentOpenUrl,
+        target: "_blank",
+        text: this.$t("open"),
+      });
+
+      options.push({
+        disabled: previewUrl === null,
+        icon: "window",
+        link: previewUrl,
+        text: this.$t("preview"),
+      });
+
+      options.push("-");
+
+      options.push({
+        click: () => this.createChildFromParent(),
+        icon: "add",
+        text: "New child page",
+      });
+
+      return options;
+    },
     resolvedShowPaths() {
       return this.showPaths !== false;
     },
@@ -255,6 +296,9 @@ export default {
       this.headline = response.headline;
       this.root = response.rootPage ?? this.parent;
       this.parentIcon = response.parentIcon ?? "folder";
+      this.parentOpenUrl = typeof response.parentOpenUrl === "string" && response.parentOpenUrl !== ""
+        ? response.parentOpenUrl
+        : null;
       this.showParent = response.showParent ?? true;
       this.showPaths = response.showPaths ?? this.standaloneShowPaths ?? true;
       this.label = response.label;
@@ -670,6 +714,41 @@ export default {
         this.$panel.dialog.close();
       }
     },
+    parentPreviewHref() {
+      if (this.resolvedRoot === "site") {
+        return "/site/preview/changes";
+      }
+
+      if (this.parentLinkHref === null) {
+        return null;
+      }
+
+      return `${this.parentLinkHref}/preview/changes`;
+    },
+    createChildFromParent() {
+      if (typeof this.parentOpenTarget !== "string" || this.parentOpenTarget === "") {
+        return;
+      }
+
+      const view = typeof window?.panel?.view?.path === "string" && window.panel.view.path !== ""
+        ? window.panel.view.path
+        : null;
+      const query = {};
+
+      if (this.resolvedRoot === "site") {
+        query.parent = "site";
+      } else {
+        query.parent = `/${this.parentOpenTarget}`;
+      }
+
+      if (view !== null) {
+        query.view = view;
+      }
+
+      this.$panel.dialog.open("pages/create", {
+        query,
+      });
+    },
     searchQueryStorageKeyForRoot(root = this.resolvedRoot) {
       return `kirby$arborescence$query$${this.panelUserId()}$${root}`;
     },
@@ -758,6 +837,21 @@ export default {
 .k-arborescence-section .k-tree-folder {
   color: inherit;
   text-decoration: none;
+}
+
+.k-arborescence-parent-branch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.k-arborescence-parent-branch .k-tree-folder {
+  min-width: 0;
+}
+
+.k-arborescence-parent-options {
+  justify-self: end;
 }
 
 .k-arborescence-search {
