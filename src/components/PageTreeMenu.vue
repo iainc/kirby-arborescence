@@ -107,6 +107,8 @@
 </template>
 
 <script>
+import { openCreateChildDialog } from "../helpers/createChildDialog";
+
 const FEATURE_FLAG_MARKER = "\u2063";
 
 function parseFeatureFlagLabel(value) {
@@ -459,9 +461,6 @@ export default {
     },
     createChild(item) {
       const parent = this.itemPanelPath(item);
-      const view = typeof window?.panel?.view?.path === "string" && window.panel.view.path !== ""
-        ? window.panel.view.path
-        : null;
       const query = {};
 
       if (parent === null) {
@@ -470,12 +469,10 @@ export default {
 
       query.parent = parent;
 
-      if (view !== null) {
-        query.view = view;
-      }
-
-      this.$panel.dialog.open("pages/create", {
+      openCreateChildDialog({
+        panel: this.$panel,
         query,
+        templateOptions: item?.childBlueprints ?? [],
       });
     },
     openItemDialog(item, action) {

@@ -92,6 +92,7 @@ import {
   loadCachedSearchIndex,
   storeCachedSearchIndex,
 } from "../searchIndexStorage";
+import { openCreateChildDialog } from "../helpers/createChildDialog";
 import SearchWorkerClient from "../searchWorkerClient";
 
 export default {
@@ -133,6 +134,8 @@ export default {
       parentIcon: null,
       parentOpenTarget: null,
       parentOpenUrl: null,
+      parentChildBlueprints: [],
+      parentCreateTargetTitle: null,
       parentTitle: null,
       root: "",
       searchIndexRevision: null,
@@ -298,6 +301,12 @@ export default {
       this.parentIcon = response.parentIcon ?? "folder";
       this.parentOpenUrl = typeof response.parentOpenUrl === "string" && response.parentOpenUrl !== ""
         ? response.parentOpenUrl
+        : null;
+      this.parentChildBlueprints = Array.isArray(response.parentChildBlueprints) === true
+        ? response.parentChildBlueprints
+        : [];
+      this.parentCreateTargetTitle = typeof response.parentCreateTargetTitle === "string" && response.parentCreateTargetTitle !== ""
+        ? response.parentCreateTargetTitle
         : null;
       this.showParent = response.showParent ?? true;
       this.showPaths = response.showPaths ?? this.standaloneShowPaths ?? true;
@@ -730,9 +739,6 @@ export default {
         return;
       }
 
-      const view = typeof window?.panel?.view?.path === "string" && window.panel.view.path !== ""
-        ? window.panel.view.path
-        : null;
       const query = {};
 
       if (this.resolvedRoot === "site") {
@@ -741,12 +747,10 @@ export default {
         query.parent = `/${this.parentOpenTarget}`;
       }
 
-      if (view !== null) {
-        query.view = view;
-      }
-
-      this.$panel.dialog.open("pages/create", {
+      openCreateChildDialog({
+        panel: this.$panel,
         query,
+        templateOptions: this.parentChildBlueprints,
       });
     },
     searchQueryStorageKeyForRoot(root = this.resolvedRoot) {

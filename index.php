@@ -236,9 +236,129 @@ if (!function_exists('arborescenceCanChangeSort')) {
     }
 }
 
+if (!function_exists('arborescenceBlueprintOptionsForTemplates')) {
+    function arborescenceBlueprintOptionsForTemplates(array $templates): array
+    {
+        $blueprints = [];
+
+        foreach ($templates as $name) {
+            if (is_string($name) !== true) {
+                continue;
+            }
+
+            $name = trim($name);
+            if ($name === '') {
+                continue;
+            }
+
+            try {
+                $props = \Kirby\Cms\Blueprint::load('pages/' . $name);
+                $title = $props['title'] ?? $name;
+            } catch (\Throwable) {
+                $title = $name;
+            }
+
+            $blueprints[$name] = [
+                'name' => $name,
+                'title' => is_string($title) === true && $title !== '' ? $title : $name,
+            ];
+        }
+
+        return array_values($blueprints);
+    }
+}
+
+if (!function_exists('arborescenceKnownChildTemplateNames')) {
+    function arborescenceKnownChildTemplateNames(Site|Page|null $model): array
+    {
+        if (!$model instanceof Page) {
+            return [];
+        }
+
+        return match ($model->intendedTemplate()->name()) {
+            'support-home' => ['support-category'],
+            'support-category' => ['support', 'support-multiplatform'],
+            'support-multiplatform' => ['support'],
+            'how-to-writer-top', 'how-to-presenter-top' => ['how-to-article'],
+            default => [],
+        };
+    }
+}
+
+if (!function_exists('arborescenceChildBlueprints')) {
+    function arborescenceChildBlueprints(Site|Page|null $model): array
+    {
+        if (!$model instanceof Site && !$model instanceof Page) {
+            return [];
+        }
+
+        $knownTemplates = arborescenceKnownChildTemplateNames($model);
+        if (count($knownTemplates) > 0) {
+            return arborescenceBlueprintOptionsForTemplates($knownTemplates);
+        }
+
+        if ($model instanceof Site) {
+            return [];
+        }
+
+        $blueprints = [];
+
+        foreach ($model->blueprint()->sections() as $section) {
+            foreach ((array)$section->blueprints() as $blueprint) {
+                $name = $blueprint['name'] ?? $blueprint['value'] ?? null;
+
+                if (is_string($name) !== true || $name === '') {
+                    continue;
+                }
+
+                $title = $blueprint['title'] ?? $blueprint['text'] ?? $name;
+
+                $blueprints[$name] = [
+                    'name' => $name,
+                    'title' => is_string($title) === true && $title !== '' ? $title : $name,
+                ];
+            }
+        }
+
+        return array_values($blueprints);
+    }
+}
+
+if (!function_exists('arborescenceCreateTargetModel')) {
+    function arborescenceCreateTargetModel(string $rootPage, Site|Page|null $model = null): Site|Page|null
+    {
+        if ($rootPage === 'site') {
+            return App::instance()->site();
+        }
+
+        if ($model instanceof Site || $model instanceof Page) {
+            return arborescenceParentModel($rootPage, $model);
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('arborescenceCreateTargetTitle')) {
+    function arborescenceCreateTargetTitle(Site|Page|null $model): string|null
+    {
+        if ($model instanceof Site) {
+            return I18n::translate('view.site');
+        }
+
+        if ($model instanceof Page) {
+            return arborescencePanelTitle($model);
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('arborescencePageMenuData')) {
     function arborescencePageMenuData(Page $page): array
     {
+        $childBlueprints = arborescenceChildBlueprints($page);
+
         return [
             'canChangeSlug' => $page->permissions()->can('changeSlug'),
             'canChangeSort' => arborescenceCanChangeSort($page),
@@ -247,8 +367,9 @@ if (!function_exists('arborescencePageMenuData')) {
             'canCreate' => $page->permissions()->can('create'),
             'canDelete' => $page->permissions()->can('delete'),
             'canDuplicate' => $page->permissions()->can('duplicate'),
+            'childBlueprints' => $childBlueprints,
             'label' => arborescencePanelTitle($page),
-            'openUrl' => $page->previewUrl(),
+            'openUrl' => $page->previewUrl() ?? $page->url(),
             'panelUrl' => $page->panel()->url(true),
             'path' => arborescenceSearchablePath($page->id()),
             'status' => $page->status(),
@@ -446,6 +567,9 @@ if (!function_exists('arborescenceTreePayload')) {
     ): array
     {
         $model = arborescenceRootModel($rootPage);
+        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
+        $createTarget = arborescenceCreateTargetModel($rootPage, $model);
+        $parentChildBlueprints = arborescenceChildBlueprints($createTarget);
 
         $payload = [
             'branchSorts' => $branchSorts,
@@ -453,6 +577,8 @@ if (!function_exists('arborescenceTreePayload')) {
             'isSite' => $model instanceof Site,
             'label' => null,
             'pages' => arborescenceTopLevelEntries($rootPage, $branchSorts),
+            'parentChildBlueprints' => $parentChildBlueprints,
+            'parentCreateTargetTitle' => arborescenceCreateTargetTitle($createTarget),
             'parentIcon' => arborescenceParentIcon($rootPage, $model),
             'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
             'parentOpenUrl' => arborescenceParentOpenUrl($rootPage, $model),
