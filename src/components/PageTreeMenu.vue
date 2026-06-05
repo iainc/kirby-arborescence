@@ -228,6 +228,18 @@ export default {
       type: Object,
       default: () => ({}),
     },
+    childTemplates: {
+      type: Object,
+      default: () => ({}),
+    },
+    createSection: {
+      type: String,
+      default: null,
+    },
+    createView: {
+      type: String,
+      default: null,
+    },
     expandedLookup: {
       type: Object,
       default: () => ({}),
@@ -461,19 +473,49 @@ export default {
     },
     createChild(item) {
       const parent = this.itemPanelPath(item);
-      const query = {};
 
       if (parent === null) {
         return;
       }
 
-      query.parent = parent;
-
       openCreateChildDialog({
         panel: this.$panel,
-        query,
-        templateOptions: item?.childBlueprints ?? [],
+        query: this.createDialogQuery(parent),
       });
+    },
+    createDialogQuery(parent) {
+      const query = {
+        parent,
+      };
+
+      if (typeof this.createSection === "string" && this.createSection !== "") {
+        query.section = this.createSection;
+      }
+
+      if (typeof this.createView === "string" && this.createView !== "") {
+        query.view = this.createView;
+      }
+
+      return query;
+    },
+    hasConfiguredChildTemplates() {
+      return Object.keys(this.childTemplates).length > 0;
+    },
+    canCreateChildForItem(item) {
+      if (this.hasConfiguredChildTemplates() !== true) {
+        return true;
+      }
+
+      const template = typeof item?.template === "string" && item.template !== ""
+        ? item.template
+        : null;
+
+      if (template === null) {
+        return false;
+      }
+
+      return Array.isArray(this.childTemplates?.[template]) === true &&
+        this.childTemplates[template].length > 0;
     },
     openItemDialog(item, action) {
       const path = this.itemDialogPath(item, action);
@@ -551,7 +593,7 @@ export default {
 
       options.push({
         click: () => this.createChild(item),
-        disabled: item?.canCreate !== true,
+        disabled: item?.canCreate !== true || this.canCreateChildForItem(item) !== true,
         icon: "add",
         text: "New child page",
       });

@@ -46,6 +46,7 @@ function buildSearchTree(parentId, keptIds, matchesById, subtreeRanks) {
       path: record.pathLabel ?? record.id,
       pathParts: match?.pathParts ?? null,
       status: record.status ?? null,
+      template: typeof record.template === "string" ? record.template : null,
       title: record.displayTitle ?? record.label,
       titleParts: match?.titleParts ?? null,
       uuid: record.uuid ?? null,

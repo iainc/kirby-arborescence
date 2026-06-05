@@ -8,7 +8,7 @@ use Kirby\Panel\Controller\PageTree;
 use Kirby\Toolkit\I18n;
 
 if (!defined('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION')) {
-    define('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION', 3);
+    define('ARBORESCENCE_SEARCH_INDEX_FORMAT_VERSION', 4);
 }
 
 if (!function_exists('arborescencePanelTitle')) {
@@ -268,59 +268,149 @@ if (!function_exists('arborescenceBlueprintOptionsForTemplates')) {
     }
 }
 
-if (!function_exists('arborescenceKnownChildTemplateNames')) {
-    function arborescenceKnownChildTemplateNames(Site|Page|null $model): array
+if (!function_exists('arborescenceNormalizeChildTemplates')) {
+    function arborescenceNormalizeChildTemplates(array|string|null $childTemplates = null): array
     {
-        if (!$model instanceof Page) {
-            return [];
-        }
+        if (is_string($childTemplates) === true) {
+            $decoded = json_decode($childTemplates, true);
 
-        return match ($model->intendedTemplate()->name()) {
-            'support-home' => ['support-category'],
-            'support-category' => ['support', 'support-multiplatform'],
-            'support-multiplatform' => ['support'],
-            'how-to-writer-top', 'how-to-presenter-top' => ['how-to-article'],
-            default => [],
-        };
-    }
-}
-
-if (!function_exists('arborescenceChildBlueprints')) {
-    function arborescenceChildBlueprints(Site|Page|null $model): array
-    {
-        if (!$model instanceof Site && !$model instanceof Page) {
-            return [];
-        }
-
-        $knownTemplates = arborescenceKnownChildTemplateNames($model);
-        if (count($knownTemplates) > 0) {
-            return arborescenceBlueprintOptionsForTemplates($knownTemplates);
-        }
-
-        if ($model instanceof Site) {
-            return [];
-        }
-
-        $blueprints = [];
-
-        foreach ($model->blueprint()->sections() as $section) {
-            foreach ((array)$section->blueprints() as $blueprint) {
-                $name = $blueprint['name'] ?? $blueprint['value'] ?? null;
-
-                if (is_string($name) !== true || $name === '') {
-                    continue;
-                }
-
-                $title = $blueprint['title'] ?? $blueprint['text'] ?? $name;
-
-                $blueprints[$name] = [
-                    'name' => $name,
-                    'title' => is_string($title) === true && $title !== '' ? $title : $name,
-                ];
+            if (is_array($decoded) === true) {
+                $childTemplates = $decoded;
+            } else {
+                return [];
             }
         }
 
-        return array_values($blueprints);
+        if (is_array($childTemplates) !== true) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($childTemplates as $parentTemplate => $templates) {
+            if (is_string($parentTemplate) !== true && is_numeric($parentTemplate) !== true) {
+                continue;
+            }
+
+            $parentTemplate = trim((string)$parentTemplate);
+
+            if ($parentTemplate === '') {
+                continue;
+            }
+
+            if (is_string($templates) === true || is_numeric($templates) === true) {
+                $templates = [(string)$templates];
+            }
+
+            if (is_array($templates) !== true) {
+                continue;
+            }
+
+            $names = [];
+
+            foreach ($templates as $template) {
+                if (is_string($template) !== true && is_numeric($template) !== true) {
+                    continue;
+                }
+
+                $template = trim((string)$template);
+
+                if ($template === '') {
+                    continue;
+                }
+
+                $names[$template] = $template;
+            }
+
+            if (count($names) === 0) {
+                continue;
+            }
+
+            $normalized[$parentTemplate] = array_values($names);
+        }
+
+        ksort($normalized);
+        return $normalized;
+    }
+}
+
+if (!function_exists('arborescenceSectionConfig')) {
+    function arborescenceSectionConfig(string|null $sectionName = null): array
+    {
+        $sectionName = trim((string)$sectionName);
+
+        if ($sectionName === '') {
+            return [];
+        }
+
+        try {
+            $section = App::instance()->site()->blueprint()->section($sectionName);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if ($section instanceof \Kirby\Cms\Section !== true || $section->type() !== 'arborescence') {
+            return [];
+        }
+
+        $rootPage = $section->rootPage();
+
+        return [
+            'branchSorts' => arborescenceNormalizeBranchSorts($section->branchSorts()),
+            'childTemplates' => arborescenceNormalizeChildTemplates($section->childTemplates()),
+            'rootPage' => is_string($rootPage) === true ? $rootPage : null,
+        ];
+    }
+}
+
+if (!function_exists('arborescenceChildTemplateName')) {
+    function arborescenceChildTemplateName(Site|Page|null $model): string|null
+    {
+        if ($model instanceof Site) {
+            return 'site';
+        }
+
+        if ($model instanceof Page) {
+            return $model->intendedTemplate()->name();
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('arborescenceChildTemplateNames')) {
+    function arborescenceChildTemplateNames(Site|Page|null $model, array $childTemplates = []): array
+    {
+        $template = arborescenceChildTemplateName($model);
+
+        if ($template === null) {
+            return [];
+        }
+
+        return $childTemplates[$template] ?? [];
+    }
+}
+
+if (!function_exists('arborescenceCreateParentFromPanelPath')) {
+    function arborescenceCreateParentFromPanelPath(string|null $path): Site|Page|null
+    {
+        $path = trim((string)$path);
+
+        if ($path === '') {
+            return null;
+        }
+
+        try {
+            $model = Find::parent($path);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($model instanceof Site || $model instanceof Page) {
+            return $model;
+        }
+
+        return null;
     }
 }
 
@@ -357,8 +447,6 @@ if (!function_exists('arborescenceCreateTargetTitle')) {
 if (!function_exists('arborescencePageMenuData')) {
     function arborescencePageMenuData(Page $page): array
     {
-        $childBlueprints = arborescenceChildBlueprints($page);
-
         return [
             'canChangeSlug' => $page->permissions()->can('changeSlug'),
             'canChangeSort' => arborescenceCanChangeSort($page),
@@ -367,12 +455,12 @@ if (!function_exists('arborescencePageMenuData')) {
             'canCreate' => $page->permissions()->can('create'),
             'canDelete' => $page->permissions()->can('delete'),
             'canDuplicate' => $page->permissions()->can('duplicate'),
-            'childBlueprints' => $childBlueprints,
             'label' => arborescencePanelTitle($page),
             'openUrl' => $page->previewUrl() ?? $page->url(),
             'panelUrl' => $page->panel()->url(true),
             'path' => arborescenceSearchablePath($page->id()),
             'status' => $page->status(),
+            'template' => $page->intendedTemplate()->name(),
         ];
     }
 }
@@ -563,25 +651,24 @@ if (!function_exists('arborescenceTreePayload')) {
         bool $showParent = true,
         bool $showPaths = true,
         array $branchSorts = [],
+        array $childTemplates = [],
         bool $includeSearchIndex = false
     ): array
     {
         $model = arborescenceRootModel($rootPage);
-        $parent = $model ? arborescenceParentModel($rootPage, $model) : null;
         $createTarget = arborescenceCreateTargetModel($rootPage, $model);
-        $parentChildBlueprints = arborescenceChildBlueprints($createTarget);
 
         $payload = [
             'branchSorts' => $branchSorts,
+            'childTemplates' => $childTemplates,
             'headline' => null,
             'isSite' => $model instanceof Site,
             'label' => null,
             'pages' => arborescenceTopLevelEntries($rootPage, $branchSorts),
-            'parentChildBlueprints' => $parentChildBlueprints,
-            'parentCreateTargetTitle' => arborescenceCreateTargetTitle($createTarget),
             'parentIcon' => arborescenceParentIcon($rootPage, $model),
             'parentOpenTarget' => arborescenceParentOpenTarget($rootPage, $model),
             'parentOpenUrl' => arborescenceParentOpenUrl($rootPage, $model),
+            'parentTemplate' => arborescenceChildTemplateName($createTarget),
             'parentTitle' => arborescenceParentTitle($rootPage, $model),
             'searchIndexRevision' => arborescenceSearchIndexRevision(),
             'searchIndexScope' => arborescenceSearchIndexScope($rootPage, $branchSorts),
@@ -761,6 +848,9 @@ Kirby::plugin(
                     'branchSorts' => function (array|string|null $branchSorts = null) {
                         return arborescenceNormalizeBranchSorts($branchSorts);
                     },
+                    'childTemplates' => function (array|string|null $childTemplates = null) {
+                        return arborescenceNormalizeChildTemplates($childTemplates);
+                    },
                 ],
                 'computed' => [
                     'parentIcon' => function () {
@@ -801,6 +891,10 @@ Kirby::plugin(
                     'parentOpenUrl' => function () {
                         return arborescenceParentOpenUrl($this->rootPage(), $this->model());
                     },
+                    'parentTemplate' => function () {
+                        $createTarget = arborescenceCreateTargetModel($this->rootPage(), $this->model());
+                        return arborescenceChildTemplateName($createTarget);
+                    },
                     'pages' => function () {
                         return arborescenceTopLevelEntries($this->rootPage(), $this->branchSorts());
                     },
@@ -817,6 +911,26 @@ Kirby::plugin(
                         return $this->model() instanceof Site;
                     },
                 ],
+                'methods' => [
+                    'blueprints' => function () {
+                        $parent = arborescenceCreateParentFromPanelPath(
+                            App::instance()->request()->get('parent')
+                        );
+                        $parent ??= arborescenceCreateTargetModel($this->rootPage(), $this->model());
+                        $childTemplates = $this->childTemplates();
+                        $templateNames = arborescenceChildTemplateNames($parent, $childTemplates);
+
+                        if (count($templateNames) > 0) {
+                            return arborescenceBlueprintOptionsForTemplates($templateNames);
+                        }
+
+                        if (count($childTemplates) > 0 || $parent instanceof Site) {
+                            return [];
+                        }
+
+                        return $parent?->blueprints() ?? [];
+                    },
+                ],
             ],
         ],
         'api' => [
@@ -825,6 +939,7 @@ Kirby::plugin(
                     'pattern' => 'arborescence/tree',
                     'method' => 'GET',
                     'action' => function () {
+                        $sectionConfig = arborescenceSectionConfig($this->requestQuery('section'));
                         $rootPage = trim((string)$this->requestQuery('root'));
                         $includeSearchIndex = $this->requestQuery('includeSearchIndex') === '1';
                         $showParent = $this->requestQuery('showParent') !== '0';
@@ -832,12 +947,28 @@ Kirby::plugin(
                         $branchSorts = arborescenceNormalizeBranchSorts(
                             $this->requestQuery('branchSorts')
                         );
+                        $childTemplates = arborescenceNormalizeChildTemplates(
+                            $this->requestQuery('childTemplates')
+                        );
+
+                        if ($rootPage === '') {
+                            $rootPage = $sectionConfig['rootPage'] ?? '';
+                        }
+
+                        if (count($branchSorts) === 0) {
+                            $branchSorts = $sectionConfig['branchSorts'] ?? [];
+                        }
+
+                        if (count($childTemplates) === 0) {
+                            $childTemplates = $sectionConfig['childTemplates'] ?? [];
+                        }
 
                         return arborescenceTreePayload(
                             $rootPage,
                             $showParent,
                             $showPaths,
                             $branchSorts,
+                            $childTemplates,
                             $includeSearchIndex
                         );
                     },

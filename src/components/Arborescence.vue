@@ -66,6 +66,9 @@
           v-if="resolvedRoot"
           :key="treeKey"
           :branch-sorts="configuredBranchSorts"
+          :child-templates="childTemplates"
+          :create-section="resolvedSection"
+          :create-view="resolvedView"
           :expanded-lookup="browseExpandedLookup"
           :items="displayedTreeItems"
           :level="treeLevel"
@@ -105,6 +108,10 @@ export default {
       type: Boolean,
       default: false,
     },
+    name: {
+      type: String,
+      default: null,
+    },
     standaloneRootPage: {
       type: String,
       default: null,
@@ -121,10 +128,15 @@ export default {
       type: Object,
       default: null,
     },
+    standaloneSection: {
+      type: String,
+      default: null,
+    },
   },
   data() {
     return {
       branchSorts: null,
+      childTemplates: {},
       headline: null,
       hasLoadedSearchIndex: false,
       isSite: false,
@@ -134,8 +146,7 @@ export default {
       parentIcon: null,
       parentOpenTarget: null,
       parentOpenUrl: null,
-      parentChildBlueprints: [],
-      parentCreateTargetTitle: null,
+      parentTemplate: null,
       parentTitle: null,
       root: "",
       searchIndexRevision: null,
@@ -247,6 +258,7 @@ export default {
 
       options.push({
         click: () => this.createChildFromParent(),
+        disabled: this.canCreateFromTemplate(this.parentTemplate) !== true,
         icon: "add",
         text: "New child page",
       });
@@ -275,6 +287,17 @@ export default {
     serializedBranchSorts() {
       return JSON.stringify(this.configuredBranchSorts);
     },
+    resolvedSection() {
+      return this.normalizePanelPath(this.standaloneSection) ??
+        this.normalizePanelPath(this.name);
+    },
+    resolvedView() {
+      const view = this.normalizePanelPath(this.standaloneSection) !== null
+        ? "site"
+        : window.panel?.view?.path;
+
+      return this.normalizePanelPath(view);
+    },
   },
 
   created: async function() {
@@ -296,17 +319,17 @@ export default {
   methods: {
     async applyResponse(response = {}) {
       this.branchSorts = response.branchSorts ?? this.standaloneBranchSorts ?? {};
+      this.childTemplates = this.normalizeChildTemplates(
+        response.childTemplates ?? {}
+      );
       this.headline = response.headline;
       this.root = response.rootPage ?? this.parent;
       this.parentIcon = response.parentIcon ?? "folder";
       this.parentOpenUrl = typeof response.parentOpenUrl === "string" && response.parentOpenUrl !== ""
         ? response.parentOpenUrl
         : null;
-      this.parentChildBlueprints = Array.isArray(response.parentChildBlueprints) === true
-        ? response.parentChildBlueprints
-        : [];
-      this.parentCreateTargetTitle = typeof response.parentCreateTargetTitle === "string" && response.parentCreateTargetTitle !== ""
-        ? response.parentCreateTargetTitle
+      this.parentTemplate = typeof response.parentTemplate === "string" && response.parentTemplate !== ""
+        ? response.parentTemplate
         : null;
       this.showParent = response.showParent ?? true;
       this.showPaths = response.showPaths ?? this.standaloneShowPaths ?? true;
@@ -459,6 +482,60 @@ export default {
         branchSorts[normalizedBranch] = normalizedSortBy;
         return branchSorts;
       }, {});
+    },
+    normalizeChildTemplates(value) {
+      if (!value || typeof value !== "object" || Array.isArray(value) === true) {
+        return {};
+      }
+
+      return Object.entries(value).reduce((childTemplates, [template, templates]) => {
+        if (typeof template !== "string" || template.trim() === "" || Array.isArray(templates) !== true) {
+          return childTemplates;
+        }
+
+        childTemplates[template.trim()] = templates
+          .filter((name) => typeof name === "string" && name.trim() !== "")
+          .map((name) => name.trim());
+        return childTemplates;
+      }, {});
+    },
+    normalizePanelPath(value) {
+      if (typeof value !== "string") {
+        return null;
+      }
+
+      const path = value.trim();
+      return path !== "" ? path : null;
+    },
+    hasConfiguredChildTemplates() {
+      return Object.keys(this.childTemplates).length > 0;
+    },
+    canCreateFromTemplate(template) {
+      if (this.hasConfiguredChildTemplates() !== true) {
+        return true;
+      }
+
+      if (typeof template !== "string" || template === "") {
+        return false;
+      }
+
+      return Array.isArray(this.childTemplates[template]) === true &&
+        this.childTemplates[template].length > 0;
+    },
+    createDialogQuery(parent) {
+      const query = {
+        parent,
+      };
+
+      if (this.resolvedSection !== null) {
+        query.section = this.resolvedSection;
+      }
+
+      if (this.resolvedView !== null) {
+        query.view = this.resolvedView;
+      }
+
+      return query;
     },
     persistBrowseExpansionState() {
       if (typeof localStorage === "undefined") {
@@ -697,12 +774,18 @@ export default {
     },
     async loadInitialData() {
       if (typeof this.standaloneRootPage === "string" && this.standaloneRootPage !== "") {
-        return this.$api.get("arborescence/tree", {
+        const query = {
           branchSorts: this.serializedBranchSorts,
           root: this.standaloneRootPage,
           showParent: this.standaloneShowParent ? "1" : "0",
           showPaths: this.standaloneShowPaths ? "1" : "0",
-        }, null, true);
+        };
+
+        if (typeof this.standaloneSection === "string" && this.standaloneSection !== "") {
+          query.section = this.standaloneSection;
+        }
+
+        return this.$api.get("arborescence/tree", query, null, true);
       }
 
       return this.load();
@@ -739,18 +822,13 @@ export default {
         return;
       }
 
-      const query = {};
-
-      if (this.resolvedRoot === "site") {
-        query.parent = "site";
-      } else {
-        query.parent = `/${this.parentOpenTarget}`;
-      }
+      const parent = this.resolvedRoot === "site"
+        ? "site"
+        : `/${this.parentOpenTarget}`;
 
       openCreateChildDialog({
         panel: this.$panel,
-        query,
-        templateOptions: this.parentChildBlueprints,
+        query: this.createDialogQuery(parent),
       });
     },
     searchQueryStorageKeyForRoot(root = this.resolvedRoot) {

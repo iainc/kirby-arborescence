@@ -12,6 +12,7 @@
       ref="arbo"
       :autofocus="true"
       :standalone-branch-sorts="branchSorts"
+      :standalone-section="section"
       :close-on-select="true"
       standalone-root-page="site"
       :standalone-show-parent="true"
@@ -31,6 +32,10 @@ export default {
     branchSorts: {
       type: Object,
       default: () => ({}),
+    },
+    section: {
+      type: String,
+      default: null,
     },
     showPaths: {
       type: Boolean,
