@@ -35,6 +35,7 @@ All section options are optional:
 - `label`: A label. (Default = `null`)
 - `rootPage`: The root of the menu to display. `site` or `pages/id+sub-id`. (Default = current content page model)
 - `showParent`: To show the parent as an antry. (Default = `true`)
+- `exclude`: Page ids to leave out of the tree, with their subpages, for example `[de, ja]`. Only this section's tree leaves them out; a search dialog opened at another root still finds them. (Default = `[]`)
 
 ### Examples
 

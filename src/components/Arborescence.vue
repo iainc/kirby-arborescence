@@ -69,6 +69,7 @@
           :child-templates="childTemplates"
           :create-section="resolvedSection"
           :create-view="resolvedView"
+          :exclude="exclude"
           :expanded-lookup="browseExpandedLookup"
           :items="displayedTreeItems"
           :level="treeLevel"
@@ -137,6 +138,7 @@ export default {
     return {
       branchSorts: null,
       childTemplates: {},
+      exclude: [],
       headline: null,
       hasLoadedSearchIndex: false,
       isSite: false,
@@ -287,6 +289,9 @@ export default {
     serializedBranchSorts() {
       return JSON.stringify(this.configuredBranchSorts);
     },
+    serializedExclude() {
+      return JSON.stringify(this.exclude);
+    },
     resolvedSection() {
       return this.normalizePanelPath(this.standaloneSection) ??
         this.normalizePanelPath(this.name);
@@ -322,6 +327,7 @@ export default {
       this.childTemplates = this.normalizeChildTemplates(
         response.childTemplates ?? {}
       );
+      this.exclude = Array.isArray(response.exclude) === true ? response.exclude : [];
       this.headline = response.headline;
       this.root = response.rootPage ?? this.parent;
       this.parentIcon = response.parentIcon ?? "folder";
@@ -406,6 +412,7 @@ export default {
       try {
         const response = await this.$api.get("arborescence/search-index", {
           branchSorts: this.serializedBranchSorts,
+          exclude: this.serializedExclude,
           root: this.resolvedRoot,
         }, null, true);
 
@@ -697,6 +704,7 @@ export default {
       try {
         const children = await this.$api.get("arborescence/children", {
           branchSorts: this.serializedBranchSorts,
+          exclude: this.serializedExclude,
           parent: preparedItem.children,
         }, null, true);
 

@@ -240,6 +240,10 @@ export default {
       type: String,
       default: null,
     },
+    exclude: {
+      type: Array,
+      default: () => [],
+    },
     expandedLookup: {
       type: Object,
       default: () => ({}),
@@ -460,6 +464,7 @@ export default {
     originalLoad(path) {
       return this.$api.get("arborescence/children", {
         branchSorts: JSON.stringify(this.branchSorts ?? {}),
+        exclude: JSON.stringify(this.exclude ?? []),
         move: this.move ?? null,
         parent: path,
       }, null, true);
